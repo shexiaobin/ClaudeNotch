@@ -1,0 +1,6 @@
+ClaudeNotch/.build/
+ClaudeNotch/.build-local/
+.DS_Store
+__pycache__/
+*.pyc
+.swiftpm/
