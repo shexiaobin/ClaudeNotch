@@ -307,24 +307,41 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Source detection
 
     private func detectSource(_ hookInput: [String: Any]) -> AgentSource {
+        if let src = hookInput["source"] as? String {
+            let lower = src.lowercased()
+            if lower.contains("cursor") { return .cursor }
+            if lower.contains("codex") { return .codex }
+        }
         if let name = hookInput["hook_event_name"] as? String {
-            if name.lowercased().contains("cursor") { return .cursor }
+            let lower = name.lowercased()
+            if lower.contains("cursor") { return .cursor }
+            if lower.contains("codex") { return .codex }
         }
         if let tool = hookInput["tool_input"] as? [String: Any],
            let desc = tool["description"] as? String,
            desc.lowercased().contains("cursor") {
             return .cursor
         }
+        if let tool = hookInput["tool_input"] as? [String: Any],
+           let desc = tool["description"] as? String,
+           desc.lowercased().contains("codex") {
+            return .codex
+        }
         return .claude
     }
 
     private func detectSourceFromEvent(_ event: [String: Any]) -> AgentSource {
         let hookName = event["hook_event_name"] as? String ?? ""
-        if hookName.contains("afterFileEdit") || hookName.contains("beforeShellExecution") {
+        let lowerHook = hookName.lowercased()
+        if lowerHook.contains("afterfileedit") || lowerHook.contains("beforeshellexecution") {
             return .cursor
         }
+        if lowerHook.contains("codex") { return .codex }
         if let src = event["source"] as? String, src.lowercased().contains("cursor") {
             return .cursor
+        }
+        if let src = event["source"] as? String, src.lowercased().contains("codex") {
+            return .codex
         }
         return .claude
     }

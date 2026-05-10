@@ -24,6 +24,8 @@ CLAUDE_STOP = ROOT / "claude_stop_bridge.py"
 CURSOR_SHELL = ROOT / "cursor_shell_hook.py"
 CURSOR_FILE = ROOT / "cursor_file_hook.py"
 CURSOR_STOP = ROOT / "cursor_stop_hook.py"
+CODEX_PERMISSION = ROOT / "codex_permission_bridge.py"
+CODEX_STOP = ROOT / "codex_stop_bridge.py"
 
 
 def read_exact(conn: socket.socket, n: int) -> bytes:
@@ -185,6 +187,19 @@ def test_cursor_shell_allow_deny_and_missing_socket() -> None:
         assert assert_json(denied.stdout) == {"permission": "deny", "agentMessage": "Blocked"}
 
 
+def test_codex_permission_and_stop_source_marker() -> None:
+    with MockServer([{"behavior": "allow"}, {"ok": True}]) as server:
+        permission = run_hook(CODEX_PERMISSION, sample_permission(), server.sock_path)
+        assert permission.returncode == 0, permission.stderr
+        decision = assert_json(permission.stdout)["hookSpecificOutput"]["decision"]
+        assert decision["behavior"] == "allow"
+        assert server.messages[0]["hook_input"]["source"] == "codex"
+
+        stop = run_hook(CODEX_STOP, {"hook_event_name": "Stop"}, server.sock_path)
+        assert stop.returncode == 0
+        assert server.messages[1]["stop_event"]["source"] == "codex"
+
+
 def main() -> int:
     tests = [
         test_claude_permission_allow,
@@ -193,6 +208,7 @@ def main() -> int:
         test_invalid_json_fallbacks,
         test_notification_and_stop_ack,
         test_cursor_shell_allow_deny_and_missing_socket,
+        test_codex_permission_and_stop_source_marker,
     ]
     for test in tests:
         test()

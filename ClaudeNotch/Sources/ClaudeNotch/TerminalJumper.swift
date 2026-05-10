@@ -49,8 +49,8 @@ enum TerminalJumper {
         switch source {
         case .cursor:
             activate(.cursor)
-        case .claude:
-            // Claude Code runs in a terminal — find the best one
+        case .claude, .codex:
+            // Claude Code and Codex usually run in a terminal — find the best one
             let preferred: [TerminalApp] = [.iterm2, .warp, .ghostty, .kitty, .terminal, .alacritty]
             let running = detectRunning()
             if let match = preferred.first(where: { running.contains($0) }) {
@@ -58,7 +58,7 @@ enum TerminalJumper {
             } else if let any = running.first {
                 activate(any)
             } else {
-                NSLog("TerminalJumper: no terminal found for Claude")
+                NSLog("TerminalJumper: no terminal found for %@", source.displayName)
             }
         }
     }

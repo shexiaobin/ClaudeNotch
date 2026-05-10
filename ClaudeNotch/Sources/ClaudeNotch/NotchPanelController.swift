@@ -871,7 +871,7 @@ private struct NotchCompletionView: View {
     private var jumpLabel: String {
         switch source {
         case .cursor: return "Cursor"
-        case .claude: return "Terminal"
+        case .claude, .codex: return "Terminal"
         }
     }
 

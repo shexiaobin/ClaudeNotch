@@ -1,13 +1,13 @@
 # ClaudeNotch
 
-macOS 灵动岛风格的 AI 编码助手通知中心。将 Claude Code 和 Cursor 的权限请求、通知、完成事件显示在屏幕顶部的灵动岛面板中，支持一键 Allow/Deny。
+macOS 灵动岛风格的 AI 编码助手通知中心。将 Claude Code、Cursor 和 Codex 的权限请求、通知、完成事件显示在屏幕顶部的灵动岛面板中，支持一键 Allow/Deny。
 
 ## 效果
 
 - **权限请求** — 灵动岛展开，显示工具名、命令内容、Allow/Deny 按钮
 - **空闲状态** — 缩小为顶部药丸，显示会话时长、来源标识、电子宠物
 - **完成通知** — 音效提示 + 宠物表情变化
-- **多来源** — 同时显示 Claude Code 和 Cursor 的会话状态
+- **多来源** — 同时显示 Claude Code、Cursor 和 Codex 的会话状态
 
 ## 支持的 AI 编码工具
 
@@ -15,6 +15,7 @@ macOS 灵动岛风格的 AI 编码助手通知中心。将 Claude Code 和 Curso
 |------|----------|
 | Claude Code | PermissionRequest, Notification, Stop |
 | Cursor | beforeShellExecution, afterFileEdit, stop |
+| Codex | PermissionRequest, Stop |
 
 ## 一键安装
 
@@ -28,6 +29,7 @@ cd ClaudeNotch
 1. 编译 Swift App（需要 Xcode Command Line Tools）
 2. 配置 Claude Code hooks (`~/.claude/settings.json`)
 3. 配置 Cursor hooks (`~/.cursor/hooks.json`)
+4. 配置 Codex hooks (`~/.codex/hooks.json`)
 
 安装完成后启动：
 
@@ -45,7 +47,7 @@ open ClaudeNotch/.build-local/ClaudeNotch
 ## 架构
 
 ```
-Claude Code / Cursor
+Claude Code / Cursor / Codex
     ↓ stdin JSON (hook 事件)
 bridge/ (Python 桥接脚本)
     ↓ Unix Socket (bridge.sock)
@@ -66,6 +68,8 @@ ClaudeNotch (Swift macOS App)
 | `cursor_shell_hook.py` | Cursor | Shell 执行审批 |
 | `cursor_file_hook.py` | Cursor | 文件编辑通知 |
 | `cursor_stop_hook.py` | Cursor | 停止事件 |
+| `codex_permission_bridge.py` | Codex | 权限请求（阻塞等待审批） |
+| `codex_stop_bridge.py` | Codex | 停止事件 |
 
 ### ClaudeNotch/ — Swift macOS App
 
@@ -136,6 +140,24 @@ ClaudeNotch (Swift macOS App)
 }
 ```
 
+**Codex** (`~/.codex/hooks.json`):
+```json
+{
+  "hooks": {
+    "PermissionRequest": [
+      {"matcher": ".*", "hooks": [
+        {"type": "command", "command": "/path/to/bridge/codex_permission_bridge.py"}
+      ]}
+    ],
+    "Stop": [
+      {"hooks": [
+        {"type": "command", "command": "/path/to/bridge/codex_stop_bridge.py"}
+      ]}
+    ]
+  }
+}
+```
+
 ## 测试
 
 ```bash
@@ -150,11 +172,11 @@ python3 bridge/test_bridge_e2e.py
 
 发布 DMG 前建议完成以下检查：
 
-- 从 GitHub Release 下载 `ClaudeNotch-1.0.1-arm64.dmg`
+- 从 GitHub Release 下载 `ClaudeNotch-1.0.2-arm64.dmg`
 - 挂载 DMG，确认包含 `ClaudeNotch.app`、`Install Hooks.command` 和说明文件
-- 运行 `Install Hooks.command` 后，确认 Claude Code 与 Cursor hooks 指向 App 包内 `Contents/Resources/bridge`
+- 运行 `Install Hooks.command` 后，确认 Claude Code、Cursor 与 Codex hooks 指向 `/Applications/ClaudeNotch.app/Contents/Resources/bridge`
 - 在一台刘海屏 MacBook 和一台非刘海或外接屏 Mac 上分别验证 idle pill、权限面板、拖拽复位和完成通知
-- 覆盖 Claude Code 的 PermissionRequest / Notification / Stop，以及 Cursor 的 beforeShellExecution / afterFileEdit / stop
+- 覆盖 Claude Code 的 PermissionRequest / Notification / Stop、Cursor 的 beforeShellExecution / afterFileEdit / stop，以及 Codex 的 PermissionRequest / Stop
 
 ## License
 

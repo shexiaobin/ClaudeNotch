@@ -6,11 +6,13 @@ import SwiftUI
 enum AgentSource: String, CaseIterable {
     case claude = "claude"
     case cursor = "cursor"
+    case codex = "codex"
 
     var displayName: String {
         switch self {
         case .claude: return "Claude Code"
         case .cursor: return "Cursor"
+        case .codex: return "Codex"
         }
     }
 
@@ -18,6 +20,7 @@ enum AgentSource: String, CaseIterable {
         switch self {
         case .claude: return Color(red: 0.9, green: 0.5, blue: 0.2)
         case .cursor: return Color(red: 0.2, green: 0.6, blue: 1.0)
+        case .codex: return Color(red: 0.15, green: 0.75, blue: 0.55)
         }
     }
 
@@ -25,6 +28,7 @@ enum AgentSource: String, CaseIterable {
         switch self {
         case .claude: return "◆"
         case .cursor: return "▶"
+        case .codex: return "C"
         }
     }
 }
