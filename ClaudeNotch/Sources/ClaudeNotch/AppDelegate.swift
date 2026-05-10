@@ -185,6 +185,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 )
                 self?.pending = nil
                 self?.updateStatusIcon("busy")
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+                    NotchPanelController.settlePetToIdle()
+                }
             },
             onDeny: { [weak self] in
                 NSLog("ClaudeNotch: user DENY for %@", toolName)
@@ -225,7 +228,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 NotchPanelController.showIdlePill(on: screen)
             }
             strongSelf.updateStatusIcon("busy")
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { PetState.mood = .idle }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+                NotchPanelController.settlePetToIdle()
+            }
         }
     }
 

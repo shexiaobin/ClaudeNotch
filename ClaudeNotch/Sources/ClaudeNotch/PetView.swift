@@ -169,6 +169,8 @@ final class PetAnimationState: ObservableObject {
         stop()
         tick = 0
         bounceOffset = 0
+        jumpOffset = 0
+        walkOffset = 0
         zzz = false
 
         bounceTimer = Timer.scheduledTimer(withTimeInterval: 0.4, repeats: true) { [weak self] _ in
@@ -204,7 +206,7 @@ final class PetAnimationState: ObservableObject {
             s.tailAngle = s.tailAngle == 0 ? 20 : (s.tailAngle == 20 ? -10 : 0)
         }
 
-        if mood == .idle {
+        if mood == .thinking {
             walkTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
                 guard let s = self else { return }
                 if s.reaction != .none { return }

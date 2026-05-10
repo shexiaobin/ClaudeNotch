@@ -125,6 +125,17 @@ enum NotchPanelController {
     static var activityLog = ActivityLog()
     static var idleStateRef: IdlePillState { idleState }
 
+    static func settlePetToIdle() {
+        PetState.mood = .idle
+        idleState.update(
+            elapsed: elapsedString(),
+            petEnabled: PetState.enabled,
+            petMood: .idle,
+            sessionSources: sessionTracker.activeSources,
+            sessionCount: sessionTracker.activeCount
+        )
+    }
+
     fileprivate(set) static var currentState: PanelState = .hidden
     enum PanelState { case hidden, idle, expanded }
     private static var isAnimating = false
