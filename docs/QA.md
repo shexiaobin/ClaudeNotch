@@ -76,7 +76,7 @@ Cursor：
 
 DMG 安装：
 
-- 从 GitHub Release 下载 `ClaudeNotch-1.0-arm64.dmg`
+- 从 GitHub Release 下载 `ClaudeNotch-1.0.1-arm64.dmg`
 - 挂载后包含 `ClaudeNotch.app`、`Install Hooks.command`、说明文件
 - 运行 `Install Hooks.command` 后 hooks 指向 `ClaudeNotch.app/Contents/Resources/bridge`
 - App 保留在 DMG 同目录或 `/Applications` 时 hooks 可用
