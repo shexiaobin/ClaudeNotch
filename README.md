@@ -8,6 +8,7 @@ macOS 灵动岛风格的 AI 编码助手通知中心。将 Claude Code、Cursor 
 - **空闲状态** — 缩小为顶部药丸，显示会话时长、来源标识、电子宠物
 - **完成通知** — 音效提示 + 宠物表情变化
 - **多来源** — 同时显示 Claude Code、Cursor 和 Codex 的会话状态
+- **刘海屏适配** — 刘海屏 idle pill 贴着刘海下沿显示，展开面板自动避开刘海区域
 
 ## 支持的 AI 编码工具
 
@@ -172,7 +173,7 @@ python3 bridge/test_bridge_e2e.py
 
 发布 DMG 前建议完成以下检查：
 
-- 从 GitHub Release 下载 `ClaudeNotch-1.0.3-arm64.dmg`
+- 从 GitHub Release 下载 `ClaudeNotch-1.0.4-arm64.dmg`
 - 挂载 DMG，确认包含 `ClaudeNotch.app`、`Install Hooks.command` 和说明文件
 - 运行 `Install Hooks.command` 后，确认 Claude Code、Cursor 与 Codex hooks 指向 `/Applications/ClaudeNotch.app/Contents/Resources/bridge`
 - 在一台刘海屏 MacBook 和一台非刘海或外接屏 Mac 上分别验证 idle pill、权限面板、拖拽复位和完成通知

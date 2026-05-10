@@ -135,22 +135,39 @@ enum NotchPanelController {
     /// Drag mode — off by default, toggled from status bar menu
     static var dragEnabled = false
 
-    /// Detect if the screen has a notch (MacBook Pro 2021+)
-    /// On notch Macs, the menu bar height is taller (~38pt) vs normal (~25pt)
-    private static func hasNotch(on screen: NSScreen) -> Bool {
-        let menuBarHeight = screen.frame.maxY - screen.visibleFrame.maxY
-        // Notch Macs have a taller menu bar area (>30pt) to accommodate the notch
-        return menuBarHeight > 30
-    }
+    private struct ScreenNotchProfile {
+        let screen: NSScreen
+        let menuBarHeight: CGFloat
+        let hasNotch: Bool
 
-    /// Calculate notch-aware Y position for the pill/panel
-    private static func panelY(for size: NSSize, on screen: NSScreen) -> CGFloat {
-        if hasNotch(on: screen) {
-            // Place inside the notch area — top of screen minus height
-            return screen.frame.maxY - size.height
-        } else {
-            // Non-notch: below menu bar
-            return screen.visibleFrame.maxY - size.height
+        init(screen: NSScreen) {
+            self.screen = screen
+            self.menuBarHeight = screen.frame.maxY - screen.visibleFrame.maxY
+            // Notch Macs have a taller menu bar area to accommodate the camera cutout.
+            self.hasNotch = menuBarHeight > 30
+        }
+
+        func idleSize(petEnabled: Bool) -> NSSize {
+            if hasNotch {
+                return NSSize(width: petEnabled ? 210 : 140, height: petEnabled ? 34 : 30)
+            }
+            return NSSize(width: petEnabled ? 240 : 160, height: petEnabled ? 38 : 32)
+        }
+
+        func defaultY(for size: NSSize, state: PanelState) -> CGFloat {
+            guard hasNotch else {
+                return screen.visibleFrame.maxY - size.height
+            }
+
+            switch state {
+            case .idle:
+                // Keep contents below the physical notch while visually attaching to its lower edge.
+                return screen.visibleFrame.maxY - size.height + 6
+            case .expanded:
+                return screen.visibleFrame.maxY - size.height - 8
+            case .hidden:
+                return screen.visibleFrame.maxY - size.height
+            }
         }
     }
 
@@ -310,13 +327,18 @@ enum NotchPanelController {
             return
         }
 
-        let w: CGFloat = petOn ? 240 : 160
-        let h: CGFloat = petOn ? 38 : 32
+        let profile = ScreenNotchProfile(screen: screen)
+        let idleSize = profile.idleSize(petEnabled: petOn)
 
-        let root = NotchIdlePillView(state: idleState, petAnim: petAnim, activityLog: activityLog)
+        let root = NotchIdlePillView(
+            state: idleState,
+            petAnim: petAnim,
+            activityLog: activityLog,
+            compact: profile.hasNotch
+        )
         let host = FirstMouseHostingView(rootView: root)
-        host.frame = NSRect(x: 0, y: 0, width: w, height: h)
-        transitionPanel(to: host, size: NSSize(width: w, height: h), state: .idle, on: screen)
+        host.frame = NSRect(origin: .zero, size: idleSize)
+        transitionPanel(to: host, size: idleSize, state: .idle, on: screen)
 
         startRefreshTimer()
     }
@@ -416,16 +438,17 @@ enum NotchPanelController {
         if let m = globalKeyMonitor { NSEvent.removeMonitor(m); globalKeyMonitor = nil }
     }
 
-    private static func panelOrigin(for size: NSSize, on screen: NSScreen) -> NSPoint {
+    private static func panelOrigin(for size: NSSize, state: PanelState, on screen: NSScreen) -> NSPoint {
+        let profile = ScreenNotchProfile(screen: screen)
         let centerX = userCenterX ?? screen.frame.midX
         let x = max(screen.frame.minX, min(centerX - size.width / 2, screen.frame.maxX - size.width))
-        let y = userY ?? panelY(for: size, on: screen)
+        let y = userY ?? profile.defaultY(for: size, state: state)
         let clampedY = max(screen.frame.minY, min(y, screen.frame.maxY - size.height))
         return NSPoint(x: x, y: clampedY)
     }
 
     private static func transitionPanel(to content: NSView, size: NSSize, state: PanelState, on screen: NSScreen) {
-        let origin = panelOrigin(for: size, on: screen)
+        let origin = panelOrigin(for: size, state: state, on: screen)
         let targetFrame = NSRect(origin: origin, size: size)
 
         if state == .expanded {
@@ -447,8 +470,8 @@ enum NotchPanelController {
             currentState = state
         } else {
             let pan = createPanel(content: content, frame: targetFrame)
-            let pillSize = NSSize(width: 160, height: 36)
-            let pillOrigin = panelOrigin(for: pillSize, on: screen)
+            let pillSize = ScreenNotchProfile(screen: screen).idleSize(petEnabled: PetState.enabled)
+            let pillOrigin = panelOrigin(for: pillSize, state: .idle, on: screen)
             let startFrame = NSRect(origin: pillOrigin, size: pillSize)
             pan.setFrame(startFrame, display: false)
             pan.alphaValue = 0
@@ -485,7 +508,7 @@ enum NotchPanelController {
             defer: false
         )
         // Use screenSaver level on notch Macs so pill appears above menu bar in notch area
-        if let screen = NSScreen.main, hasNotch(on: screen) {
+        if let screen = NSScreen.main, ScreenNotchProfile(screen: screen).hasNotch {
             pan.level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.maximumWindow)))
         } else {
             pan.level = .statusBar
@@ -773,16 +796,17 @@ private struct NotchIdlePillView: View {
     @ObservedObject var state: IdlePillState
     @ObservedObject var petAnim: PetAnimationState
     @ObservedObject var activityLog: ActivityLog
+    let compact: Bool
 
     @Environment(\.colorScheme) private var scheme
 
     var body: some View {
         let theme = NotchTheme.current(scheme)
-        HStack(spacing: 6) {
+        HStack(spacing: compact ? 4 : 6) {
             if state.petEnabled {
                 PixelPetView(mood: state.petMood, anim: petAnim, interactive: true)
-                    .frame(width: 60, height: 28)
-                    .scaleEffect(0.9)
+                    .frame(width: compact ? 44 : 60, height: compact ? 24 : 28)
+                    .scaleEffect(compact ? 0.74 : 0.9)
             } else {
                 Circle()
                     .fill(Color.green)
@@ -792,18 +816,18 @@ private struct NotchIdlePillView: View {
             // Activity ticker or session info
             if state.isWorking, !state.lastActivity.isEmpty {
                 Text(state.lastActivity)
-                    .font(.system(size: 9, weight: .medium, design: .monospaced))
+                    .font(.system(size: compact ? 8 : 9, weight: .medium, design: .monospaced))
                     .foregroundColor(Color.green.opacity(0.9))
                     .lineLimit(1)
-                    .frame(maxWidth: 120, alignment: .leading)
+                    .frame(maxWidth: compact ? 86 : 120, alignment: .leading)
             } else if state.sessionCount > 0 {
-                HStack(spacing: 3) {
+                HStack(spacing: compact ? 2 : 3) {
                     ForEach(0..<state.sessionSources.count, id: \.self) { i in
                         let src = state.sessionSources[i]
                         Text(src.icon)
-                            .font(.system(size: 8, weight: .bold))
+                            .font(.system(size: compact ? 7 : 8, weight: .bold))
                             .foregroundColor(src.color)
-                            .padding(.horizontal, 3)
+                            .padding(.horizontal, compact ? 2 : 3)
                             .padding(.vertical, 1)
                             .background(src.color.opacity(0.15))
                             .cornerRadius(3)
@@ -818,7 +842,7 @@ private struct NotchIdlePillView: View {
 
             if !state.elapsed.isEmpty {
                 Text(state.elapsed)
-                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .font(.system(size: compact ? 9 : 10, weight: .medium, design: .monospaced))
                     .foregroundColor(theme.textTertiary)
             }
 
@@ -827,8 +851,8 @@ private struct NotchIdlePillView: View {
                 PulsingDot()
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 4)
+        .padding(.horizontal, compact ? 10 : 12)
+        .padding(.vertical, compact ? 3 : 4)
         .background(NotchBackground(shape: Capsule()))
         .contentShape(Capsule())
         .onTapGesture {
