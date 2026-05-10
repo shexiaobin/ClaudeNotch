@@ -272,18 +272,20 @@ enum NotchPanelController {
 
     // MARK: - Completion notification (expanded banner, auto-dismiss)
 
-    static func showCompletion(source: AgentSource, message: String? = nil, cwd: String? = nil) {
+    static func showCompletion(source: AgentSource, message: String? = nil, cwd: String? = nil,
+                               launchContext: AgentLaunchContext = .unknown) {
         stopRefreshTimer()
         guard let screen = NSScreen.main else { return }
 
         let root = NotchCompletionView(
             source: source,
+            launchContext: launchContext,
             message: message ?? "Task completed",
             elapsed: elapsedString(),
             petEnabled: PetState.enabled,
             petAnim: petAnim,
             onJump: {
-                TerminalJumper.jump(cwd: cwd, source: source)
+                TerminalJumper.jump(cwd: cwd, source: source, launchContext: launchContext)
                 animateTo(.idle, on: screen)
             },
             onDismiss: {
@@ -920,6 +922,7 @@ private struct PulsingDot: View {
 
 private struct NotchCompletionView: View {
     let source: AgentSource
+    let launchContext: AgentLaunchContext
     let message: String
     let elapsed: String
     let petEnabled: Bool
@@ -930,10 +933,7 @@ private struct NotchCompletionView: View {
     @Environment(\.colorScheme) private var scheme
 
     private var jumpLabel: String {
-        switch source {
-        case .cursor: return "Cursor"
-        case .claude, .codex: return "Terminal"
-        }
+        TerminalJumper.jumpLabel(for: source, launchContext: launchContext)
     }
 
     var body: some View {

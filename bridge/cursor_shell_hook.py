@@ -20,6 +20,8 @@ import struct
 import sys
 from pathlib import Path
 
+from launch_context import detect_launch_context
+
 DEFAULT_SOCK = Path.home() / ".claude-notch" / "bridge.sock"
 
 
@@ -47,6 +49,8 @@ def main() -> int:
     hook_input = {
         "session_id": cursor_input.get("conversation_id", ""),
         "cwd": cursor_input.get("workspace_roots", ["/"])[0] if cursor_input.get("workspace_roots") else "/",
+        "source": "cursor",
+        "launch_context": detect_launch_context("cursor"),
         "hook_event_name": "PermissionRequest",
         "tool_name": "Bash",
         "tool_input": {

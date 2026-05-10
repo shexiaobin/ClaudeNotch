@@ -88,10 +88,17 @@ class MockServer:
             self.ready.set()
 
 
-def run_hook(script: Path, stdin_obj: Any, sock_path: str | None = None) -> subprocess.CompletedProcess[str]:
+def run_hook(
+    script: Path,
+    stdin_obj: Any,
+    sock_path: str | None = None,
+    extra_env: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess[str]:
     env = {**os.environ}
     if sock_path is not None:
         env["CLAUDE_NOTCH_SOCKET"] = sock_path
+    if extra_env:
+        env.update(extra_env)
     stdin_text = stdin_obj if isinstance(stdin_obj, str) else json.dumps(stdin_obj)
     return subprocess.run(
         [sys.executable, str(script)],
@@ -175,10 +182,17 @@ def test_cursor_shell_allow_deny_and_missing_socket() -> None:
     assert assert_json(missing.stdout) == {"permission": "allow"}
 
     with MockServer([{"behavior": "allow"}]) as server:
-        allowed = run_hook(CURSOR_SHELL, cursor_input, server.sock_path)
+        allowed = run_hook(
+            CURSOR_SHELL,
+            cursor_input,
+            server.sock_path,
+            {"CLAUDE_NOTCH_CURSOR_TARGET": "app"},
+        )
         assert allowed.returncode == 0
         assert assert_json(allowed.stdout) == {"permission": "allow"}
         hook_input = server.messages[0]["hook_input"]
+        assert hook_input["source"] == "cursor"
+        assert hook_input["launch_context"] == "app"
         assert hook_input["tool_input"]["description"] == "Cursor shell execution"
 
     with MockServer([{"behavior": "deny", "message": "Blocked"}]) as server:
@@ -189,15 +203,41 @@ def test_cursor_shell_allow_deny_and_missing_socket() -> None:
 
 def test_codex_permission_and_stop_source_marker() -> None:
     with MockServer([{"behavior": "allow"}, {"ok": True}]) as server:
-        permission = run_hook(CODEX_PERMISSION, sample_permission(), server.sock_path)
+        permission = run_hook(
+            CODEX_PERMISSION,
+            sample_permission(),
+            server.sock_path,
+            {"CLAUDE_NOTCH_CODEX_TARGET": "app"},
+        )
         assert permission.returncode == 0, permission.stderr
         decision = assert_json(permission.stdout)["hookSpecificOutput"]["decision"]
         assert decision["behavior"] == "allow"
         assert server.messages[0]["hook_input"]["source"] == "codex"
+        assert server.messages[0]["hook_input"]["launch_context"] == "app"
 
-        stop = run_hook(CODEX_STOP, {"hook_event_name": "Stop"}, server.sock_path)
+        stop = run_hook(
+            CODEX_STOP,
+            {"hook_event_name": "Stop"},
+            server.sock_path,
+            {"CLAUDE_NOTCH_CODEX_TARGET": "terminal"},
+        )
         assert stop.returncode == 0
         assert server.messages[1]["stop_event"]["source"] == "codex"
+        assert server.messages[1]["stop_event"]["launch_context"] == "terminal"
+
+
+def test_cursor_stop_source_and_launch_context() -> None:
+    with MockServer([{"ok": True}]) as server:
+        stop = run_hook(
+            CURSOR_STOP,
+            {"conversation_id": "cursor-test", "hook_event_name": "stop"},
+            server.sock_path,
+            {"CLAUDE_NOTCH_CURSOR_TARGET": "terminal"},
+        )
+        assert stop.returncode == 0
+        event = server.messages[0]["stop_event"]
+        assert event["source"] == "cursor"
+        assert event["launch_context"] == "terminal"
 
 
 def main() -> int:
@@ -209,6 +249,7 @@ def main() -> int:
         test_notification_and_stop_ack,
         test_cursor_shell_allow_deny_and_missing_socket,
         test_codex_permission_and_stop_source_marker,
+        test_cursor_stop_source_and_launch_context,
     ]
     for test in tests:
         test()

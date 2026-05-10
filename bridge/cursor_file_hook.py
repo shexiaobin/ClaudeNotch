@@ -13,6 +13,8 @@ import struct
 import sys
 from pathlib import Path
 
+from launch_context import detect_launch_context
+
 DEFAULT_SOCK = Path.home() / ".claude-notch" / "bridge.sock"
 
 
@@ -39,6 +41,8 @@ def main() -> int:
             s.connect(path)
             msg = {"notification": {
                 "hook_event_name": "afterFileEdit",
+                "source": "cursor",
+                "launch_context": detect_launch_context("cursor"),
                 "file_path": cursor_input.get("file_path", ""),
                 "edits_count": len(cursor_input.get("edits", [])),
             }}

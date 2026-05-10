@@ -9,6 +9,8 @@ import struct
 import sys
 from pathlib import Path
 
+from launch_context import detect_launch_context
+
 DEFAULT_REL = Path.home() / ".claude-notch" / "bridge.sock"
 
 
@@ -26,6 +28,7 @@ def main() -> int:
         return 0
 
     hook_input["source"] = "codex"
+    hook_input["launch_context"] = detect_launch_context("codex")
 
     path = socket_path()
     if not os.path.exists(path):

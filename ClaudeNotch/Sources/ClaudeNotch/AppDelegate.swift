@@ -272,6 +272,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         } else if let stop = msg["stop_event"] as? [String: Any] {
             let source = detectSourceFromEvent(stop)
+            let launchContext = AgentLaunchContext(rawValue: stop["launch_context"] as? String)
             let cwd = stop["cwd"] as? String ?? ""
             let sessionId = stop["session_id"] as? String ?? "default-\(source.rawValue)"
 
@@ -294,7 +295,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             } else {
                 message = "Task completed"
             }
-            NotchPanelController.showCompletion(source: source, message: message, cwd: cwd)
+            NotchPanelController.showCompletion(
+                source: source,
+                message: message,
+                cwd: cwd,
+                launchContext: launchContext
+            )
             DispatchQueue.main.asyncAfter(deadline: .now() + 5) { PetState.mood = .idle }
         }
     }

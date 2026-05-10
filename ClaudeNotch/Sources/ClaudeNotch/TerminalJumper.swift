@@ -1,5 +1,19 @@
 import AppKit
 
+enum AgentLaunchContext: String {
+    case app
+    case terminal
+    case unknown
+
+    init(rawValue: String?) {
+        switch rawValue?.lowercased() {
+        case "app": self = .app
+        case "terminal": self = .terminal
+        default: self = .unknown
+        }
+    }
+}
+
 enum TerminalJumper {
 
     enum TerminalApp: String, CaseIterable {
@@ -31,9 +45,10 @@ enum TerminalJumper {
         return TerminalApp.allCases.filter { ids.contains($0.rawValue) }
     }
 
-    static func jump(cwd: String? = nil, source: AgentSource? = nil) {
+    static func jump(cwd: String? = nil, source: AgentSource? = nil,
+                     launchContext: AgentLaunchContext = .unknown) {
         if let source = source {
-            jumpToSource(source)
+            jumpToSource(source, launchContext: launchContext)
             return
         }
         let terminals = detectRunning()
@@ -44,22 +59,72 @@ enum TerminalJumper {
         activate(target)
     }
 
-    static func jumpToSource(_ source: AgentSource) {
-        NSLog("TerminalJumper: jumpToSource(%@)", source.rawValue)
+    static func jumpToSource(_ source: AgentSource, launchContext: AgentLaunchContext = .unknown) {
+        NSLog("TerminalJumper: jumpToSource(%@, %@)", source.rawValue, launchContext.rawValue)
         switch source {
         case .cursor:
-            activate(.cursor)
-        case .claude, .codex:
-            // Claude Code and Codex usually run in a terminal — find the best one
-            let preferred: [TerminalApp] = [.iterm2, .warp, .ghostty, .kitty, .terminal, .alacritty]
-            let running = detectRunning()
-            if let match = preferred.first(where: { running.contains($0) }) {
-                activate(match)
-            } else if let any = running.first {
-                activate(any)
+            if launchContext == .terminal {
+                activatePreferredTerminal(for: source)
             } else {
-                NSLog("TerminalJumper: no terminal found for %@", source.displayName)
+                activate(.cursor)
             }
+        case .codex:
+            switch launchContext {
+            case .app:
+                activateBundleIdentifier("com.openai.codex", displayName: "Codex")
+            case .terminal:
+                activatePreferredTerminal(for: source)
+            case .unknown:
+                if isBundleRunning("com.openai.codex") {
+                    activateBundleIdentifier("com.openai.codex", displayName: "Codex")
+                } else {
+                    activatePreferredTerminal(for: source)
+                }
+            }
+        case .claude:
+            activatePreferredTerminal(for: source)
+        }
+    }
+
+    static func jumpLabel(for source: AgentSource,
+                          launchContext: AgentLaunchContext = .unknown) -> String {
+        switch source {
+        case .cursor:
+            return launchContext == .terminal ? (terminalLabel() ?? "Terminal") : "Cursor"
+        case .codex:
+            if launchContext == .terminal { return terminalLabel() ?? "Terminal" }
+            if launchContext == .app || isBundleRunning("com.openai.codex") { return "Codex" }
+            return terminalLabel() ?? "Terminal"
+        case .claude:
+            return terminalLabel() ?? "Terminal"
+        }
+    }
+
+    static func activatePreferredTerminal(for source: AgentSource) {
+        let preferred: [TerminalApp] = [.iterm2, .warp, .ghostty, .kitty, .terminal, .alacritty]
+        let running = detectRunning()
+        if let match = preferred.first(where: { running.contains($0) }) {
+            activate(match)
+        } else if let any = running.first {
+            activate(any)
+        } else {
+            NSLog("TerminalJumper: no terminal found for %@", source.displayName)
+        }
+    }
+
+    static func isBundleRunning(_ bundleIdentifier: String) -> Bool {
+        NSWorkspace.shared.runningApplications.contains { $0.bundleIdentifier == bundleIdentifier }
+    }
+
+    static func activateBundleIdentifier(_ bundleIdentifier: String, displayName: String) {
+        let proc = Process()
+        proc.launchPath = "/usr/bin/open"
+        proc.arguments = ["-b", bundleIdentifier]
+        do {
+            try proc.run()
+            NSLog("TerminalJumper: opened %@", displayName)
+        } catch {
+            NSLog("TerminalJumper: failed to open %@: %@", displayName, error.localizedDescription)
         }
     }
 

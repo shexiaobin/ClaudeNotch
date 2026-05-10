@@ -13,6 +13,7 @@ import socket
 import sys
 
 from claude_permission_bridge import TIMEOUT_SEC, framed_send_recv, socket_path
+from launch_context import detect_launch_context
 
 
 def main() -> int:
@@ -27,6 +28,7 @@ def main() -> int:
         return 1
 
     hook_input["source"] = "codex"
+    hook_input["launch_context"] = detect_launch_context("codex")
 
     path = socket_path()
     if not os.path.exists(path):

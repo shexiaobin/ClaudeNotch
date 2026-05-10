@@ -13,6 +13,8 @@ import struct
 import sys
 from pathlib import Path
 
+from launch_context import detect_launch_context
+
 DEFAULT_SOCK = Path.home() / ".claude-notch" / "bridge.sock"
 
 
@@ -32,6 +34,9 @@ def main() -> int:
     path = sock_path()
     if not os.path.exists(path):
         return 0
+
+    cursor_input["source"] = "cursor"
+    cursor_input["launch_context"] = detect_launch_context("cursor")
 
     try:
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
