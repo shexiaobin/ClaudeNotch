@@ -4,7 +4,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var server: UnixSocketServer?
     private var pending: PendingPrompt?
     private var statusItem: NSStatusItem?
-    private var autoTimeoutSec: TimeInterval = 120
+    private var autoTimeoutSec: TimeInterval = 5
     private var timeoutTimer: Timer?
     private let socketPath: String = {
         if let e = ProcessInfo.processInfo.environment["CLAUDE_NOTCH_SOCKET"], !e.isEmpty {
@@ -74,6 +74,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         petItem.target = self
         menu.addItem(petItem)
 
+        let dragItem = NSMenuItem(title: "Drag: OFF", action: #selector(toggleDrag(_:)), keyEquivalent: "d")
+        dragItem.target = self
+        menu.addItem(dragItem)
+
+        let resetItem = NSMenuItem(title: "Reset Position", action: #selector(resetPosition(_:)), keyEquivalent: "r")
+        resetItem.target = self
+        menu.addItem(resetItem)
+
         menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(title: "Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
         statusItem?.menu = menu
@@ -83,6 +91,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         PetState.enabled.toggle()
         sender.title = PetState.enabled ? "Pet: ON" : "Pet: OFF"
         if let screen = NSScreen.main, pending == nil {
+            NotchPanelController.showIdlePill(on: screen)
+        }
+    }
+
+    @objc private func toggleDrag(_ sender: NSMenuItem) {
+        NotchPanelController.dragEnabled.toggle()
+        sender.title = NotchPanelController.dragEnabled ? "Drag: ON ✋" : "Drag: OFF"
+    }
+
+    @objc private func resetPosition(_ sender: NSMenuItem) {
+        NotchPanelController.userCenterX = nil
+        NotchPanelController.userY = nil
+        if let screen = NSScreen.main, pending == nil {
+            NotchPanelController.dismiss()
             NotchPanelController.showIdlePill(on: screen)
         }
     }
@@ -137,6 +159,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         PetState.mood = emotion == .idle ? .thinking : emotion
 
+        // Activity log
+        let detail = activityDetail(toolName: toolName, toolInput: toolInput)
+        NotchPanelController.activityLog.append(tool: toolName, detail: detail, source: source)
+        NotchPanelController.idleStateRef.isWorking = true
+        NotchPanelController.idleStateRef.lastActivity = "$ \(detail.prefix(40))"
+
         let prompt = PendingPrompt(hookInput: hookInput, reply: reply, source: source)
         pending = prompt
 
@@ -146,6 +174,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             hookInput: hookInput,
             source: source,
             onAllow: { [weak self] in
+                NSLog("ClaudeNotch: user ALLOW for %@", toolName)
                 self?.cancelAutoTimeout()
                 SoundPlayer.play(.allowed)
                 self?.pending?.completeAllow()
@@ -158,6 +187,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.updateStatusIcon("busy")
             },
             onDeny: { [weak self] in
+                NSLog("ClaudeNotch: user DENY for %@", toolName)
                 self?.cancelAutoTimeout()
                 SoundPlayer.play(.denied)
                 self?.pending?.completeDeny(message: nil)
@@ -179,13 +209,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         cancelAutoTimeout()
         timeoutTimer = Timer.scheduledTimer(withTimeInterval: autoTimeoutSec, repeats: false) { [weak self] _ in
             guard let strongSelf = self, strongSelf.pending != nil else { return }
-            NSLog("ClaudeNotch: auto-deny after %.0fs for %@", strongSelf.autoTimeoutSec, toolName)
-            SoundPlayer.play(.denied)
-            strongSelf.pending?.completeDeny(message: "Auto-denied: no response within \(Int(strongSelf.autoTimeoutSec))s")
-            strongSelf.appendHistory(toolName + " (timeout)", source: source, allowed: false)
+            NSLog("ClaudeNotch: auto-allow after %.0fs for %@", strongSelf.autoTimeoutSec, toolName)
+            SoundPlayer.play(.allowed)
+            strongSelf.pending?.completeAllow()
+            strongSelf.appendHistory(toolName + " (auto)", source: source, allowed: true)
+            PetState.mood = .happy
             strongSelf.pending = nil
-            NotchPanelController.dismiss()
+            if let screen = NSScreen.main {
+                NotchPanelController.showIdlePill(on: screen)
+            }
             strongSelf.updateStatusIcon("busy")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { PetState.mood = .idle }
         }
     }
 
@@ -210,8 +244,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             )
 
             NSLog("ClaudeNotch notification [%@]: %@", source.displayName, hookName)
+            NotchPanelController.activityLog.append(tool: hookName, detail: cwd, source: source)
+            NotchPanelController.idleStateRef.isWorking = true
+            NotchPanelController.idleStateRef.lastActivity = hookName
             updateStatusIcon("waiting")
-            if let screen = NSScreen.main {
+            if NotchPanelController.currentState != .expanded, let screen = NSScreen.main {
                 NotchPanelController.showIdlePill(on: screen)
             }
         } else if let stop = msg["stop_event"] as? [String: Any] {
@@ -228,10 +265,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             PetState.mood = .happy
             updateStatusIcon("done")
             SoundPlayer.play(.allowed)
-            if let screen = NSScreen.main {
-                NotchPanelController.showIdlePill(on: screen)
+            NotchPanelController.idleStateRef.isWorking = false
+            NotchPanelController.idleStateRef.lastActivity = ""
+
+            let stopReason = stop["stop_reason"] as? String
+            let message: String
+            if let reason = stopReason, !reason.isEmpty {
+                message = reason
+            } else {
+                message = "Task completed"
             }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 3) { PetState.mood = .idle }
+            NotchPanelController.showCompletion(source: source, message: message, cwd: cwd)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 5) { PetState.mood = .idle }
+        }
+    }
+
+    // MARK: - Activity detail extraction
+
+    private func activityDetail(toolName: String, toolInput: [String: Any]) -> String {
+        switch toolName.lowercased() {
+        case "bash":
+            return toolInput["command"] as? String ?? ""
+        case "read":
+            return toolInput["file_path"] as? String ?? ""
+        case "edit", "write":
+            return toolInput["file_path"] as? String ?? ""
+        case "grep":
+            let pattern = toolInput["pattern"] as? String ?? ""
+            let path = toolInput["path"] as? String ?? ""
+            return "\(pattern) in \(path)"
+        case "glob":
+            return toolInput["pattern"] as? String ?? ""
+        case "agent":
+            return toolInput["prompt"] as? String ?? toolInput["description"] as? String ?? ""
+        default:
+            let pieces = toolInput.values.compactMap { $0 as? String }
+            return pieces.joined(separator: " ").prefix(80).description
         }
     }
 

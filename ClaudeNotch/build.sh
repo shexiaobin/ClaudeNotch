@@ -12,5 +12,5 @@ swiftc -O -target arm64-apple-macosx11.0 \
   -sdk "$SDK" \
   -framework AppKit -framework SwiftUI \
   -o "${OUT}/ClaudeNotch" \
-  main.swift AppDelegate.swift UnixSocketServer.swift NotchPanelController.swift SoundPlayer.swift PetView.swift SessionTracker.swift MarkdownView.swift TerminalJumper.swift ChatEngine.swift
+  main.swift AppDelegate.swift UnixSocketServer.swift NotchPanelController.swift SoundPlayer.swift PetView.swift SessionTracker.swift MarkdownView.swift TerminalJumper.swift
 echo "Built: ${OUT}/ClaudeNotch"

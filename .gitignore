@@ -4,3 +4,4 @@ ClaudeNotch/.build-local/
 __pycache__/
 *.pyc
 .swiftpm/
+dist/

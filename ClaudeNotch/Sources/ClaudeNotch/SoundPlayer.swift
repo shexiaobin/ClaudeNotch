@@ -7,8 +7,12 @@ enum SoundEffect: String {
 }
 
 enum SoundPlayer {
+    private static var currentSound: NSSound?
+
     static func play(_ effect: SoundEffect) {
+        currentSound?.stop()
         if let sound = NSSound(named: NSSound.Name(effect.rawValue)) {
+            currentSound = sound
             sound.play()
         }
     }

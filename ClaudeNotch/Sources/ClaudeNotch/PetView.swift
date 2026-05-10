@@ -45,6 +45,8 @@ final class PetAnimationState: ObservableObject {
     @Published var showHeart: Bool = false
     @Published var showBubble: String = ""
     @Published var squish: CGFloat = 1.0
+    @Published var isHovered: Bool = false
+    @Published var hoverScale: CGFloat = 1.0
 
     private var bounceTimer: Timer?
     private var blinkTimer: Timer?
@@ -54,6 +56,30 @@ final class PetAnimationState: ObservableObject {
 
     var tapCount: Int = 0
     private var tapResetTimer: Timer?
+
+    // MARK: - Hover interaction
+
+    func handleHoverEnter() {
+        isHovered = true
+        hoverScale = 1.5
+        if reaction == .none {
+            showBubble = "Hi!"
+            eyesClosed = true
+            squish = 0.9
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+                self?.eyesClosed = false
+                self?.squish = 1.0
+            }
+        }
+    }
+
+    func handleHoverExit() {
+        isHovered = false
+        hoverScale = 1.0
+        if showBubble == "Hi!" {
+            showBubble = ""
+        }
+    }
 
     // MARK: - Tap interaction
 
@@ -238,8 +264,18 @@ struct PixelPetView: View {
                 .scaleEffect(x: anim.facing * anim.squish, y: anim.squish)
                 .rotationEffect(.degrees(anim.rotationAngle))
         }
+        .scaleEffect(anim.hoverScale)
+        .animation(.spring(response: 0.3, dampingFraction: 0.5, blendDuration: 0), value: anim.hoverScale)
         .frame(width: 80, height: 28)
         .contentShape(Rectangle())
+        .background(
+            interactive
+                ? AnyView(HoverTrackingView(
+                    onEnter: { anim.handleHoverEnter() },
+                    onExit: { anim.handleHoverExit() }
+                  ))
+                : AnyView(EmptyView())
+        )
         .onTapGesture {
             if interactive {
                 anim.handleTap()
@@ -357,6 +393,54 @@ struct PixelPetView: View {
                     .offset(y: -1)
             }
         }
+    }
+}
+
+// MARK: - Hover tracking (works with nonactivating NSPanel)
+
+private struct HoverTrackingView: NSViewRepresentable {
+    let onEnter: () -> Void
+    let onExit: () -> Void
+
+    func makeNSView(context: Context) -> HoverNSView {
+        let v = HoverNSView()
+        v.onEnter = onEnter
+        v.onExit = onExit
+        return v
+    }
+
+    func updateNSView(_ nsView: HoverNSView, context: Context) {
+        nsView.onEnter = onEnter
+        nsView.onExit = onExit
+    }
+}
+
+private final class HoverNSView: NSView {
+    var onEnter: (() -> Void)?
+    var onExit: (() -> Void)?
+    private var trackingArea: NSTrackingArea?
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let existing = trackingArea {
+            removeTrackingArea(existing)
+        }
+        let ta = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(ta)
+        trackingArea = ta
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        onEnter?()
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        onExit?()
     }
 }
 

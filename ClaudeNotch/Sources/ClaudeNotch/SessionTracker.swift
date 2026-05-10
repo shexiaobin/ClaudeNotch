@@ -82,16 +82,6 @@ final class SessionTracker: ObservableObject {
         cleanStale()
     }
 
-    func markCompleted(id: String) {
-        sessions[id]?.status = .completed
-        sessions[id]?.lastActivity = Date()
-    }
-
-    func latestCwd() -> String? {
-        sessions.values
-            .sorted(by: { $0.lastActivity > $1.lastActivity })
-            .first?.cwd
-    }
 
     private func cleanStale() {
         let cutoff = Date().addingTimeInterval(-300)

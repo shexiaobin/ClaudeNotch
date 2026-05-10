@@ -31,7 +31,11 @@ enum TerminalJumper {
         return TerminalApp.allCases.filter { ids.contains($0.rawValue) }
     }
 
-    static func jump(cwd: String? = nil) {
+    static func jump(cwd: String? = nil, source: AgentSource? = nil) {
+        if let source = source {
+            jumpToSource(source)
+            return
+        }
         let terminals = detectRunning()
         guard let target = terminals.first else {
             NSLog("TerminalJumper: no terminal app detected")
@@ -40,12 +44,35 @@ enum TerminalJumper {
         activate(target)
     }
 
+    static func jumpToSource(_ source: AgentSource) {
+        NSLog("TerminalJumper: jumpToSource(%@)", source.rawValue)
+        switch source {
+        case .cursor:
+            activate(.cursor)
+        case .claude:
+            // Claude Code runs in a terminal — find the best one
+            let preferred: [TerminalApp] = [.iterm2, .warp, .ghostty, .kitty, .terminal, .alacritty]
+            let running = detectRunning()
+            if let match = preferred.first(where: { running.contains($0) }) {
+                activate(match)
+            } else if let any = running.first {
+                activate(any)
+            } else {
+                NSLog("TerminalJumper: no terminal found for Claude")
+            }
+        }
+    }
+
     static func activate(_ app: TerminalApp) {
-        guard let running = NSWorkspace.shared.runningApplications
-            .first(where: { $0.bundleIdentifier == app.rawValue })
-        else { return }
-        running.activate(options: [.activateAllWindows])
-        NSLog("TerminalJumper: activated %@", app.displayName)
+        let proc = Process()
+        proc.launchPath = "/usr/bin/open"
+        proc.arguments = ["-a", app.displayName]
+        do {
+            try proc.run()
+            NSLog("TerminalJumper: opened %@", app.displayName)
+        } catch {
+            NSLog("TerminalJumper: failed to open %@: %@", app.displayName, error.localizedDescription)
+        }
     }
 
     static func terminalLabel() -> String? {
