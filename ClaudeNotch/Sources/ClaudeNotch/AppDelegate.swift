@@ -181,7 +181,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.appendHistory(toolName, source: source, allowed: true)
                 NotchPanelController.sessionTracker.upsert(
                     id: sessionId, source: source, status: .active,
-                    cwd: cwd, tool: toolName, emotion: .happy
+                    cwd: cwd, tool: toolName, emotion: .idle
                 )
                 self?.pending = nil
                 self?.updateStatusIcon("busy")
@@ -213,6 +213,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             SoundPlayer.play(.allowed)
             strongSelf.pending?.completeAllow()
             strongSelf.appendHistory(toolName + " (auto)", source: source, allowed: true)
+            let sessionId = strongSelf.pending?.hookInput["session_id"] as? String ?? "default"
+            let cwd = strongSelf.pending?.hookInput["cwd"] as? String ?? ""
+            NotchPanelController.sessionTracker.upsert(
+                id: sessionId, source: source, status: .active,
+                cwd: cwd, tool: toolName, emotion: .idle
+            )
             PetState.mood = .happy
             strongSelf.pending = nil
             if let screen = NSScreen.main {

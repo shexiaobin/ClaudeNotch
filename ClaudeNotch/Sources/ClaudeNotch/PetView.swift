@@ -2,7 +2,7 @@ import SwiftUI
 
 // MARK: - Pet mood (driven by Claude state)
 
-enum PetMood {
+enum PetMood: Equatable {
     case idle
     case thinking
     case happy
@@ -168,13 +168,17 @@ final class PetAnimationState: ObservableObject {
     func start(mood: PetMood) {
         stop()
         tick = 0
+        bounceOffset = 0
+        zzz = false
 
         bounceTimer = Timer.scheduledTimer(withTimeInterval: 0.4, repeats: true) { [weak self] _ in
             guard let s = self else { return }
             if s.reaction != .none { return }
             s.tick += 1
             switch mood {
-            case .idle, .thinking:
+            case .idle:
+                s.bounceOffset = 0
+            case .thinking:
                 s.bounceOffset = s.bounceOffset == 0 ? -2 : 0
             case .happy:
                 s.bounceOffset = s.bounceOffset == 0 ? -3 : 0
@@ -283,6 +287,9 @@ struct PixelPetView: View {
             }
         }
         .onAppear { anim.start(mood: mood) }
+        .onChange(of: mood) { newMood in
+            anim.start(mood: newMood)
+        }
         .onDisappear { anim.stop() }
     }
 
