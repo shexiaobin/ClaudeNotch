@@ -76,28 +76,49 @@ mkdir -p "$HOME/.cursor"
 CURSOR_HOOKS="$HOME/.cursor/hooks.json"
 
 python3 << PYEOF
-import json
+import json, os
 
+path = "$CURSOR_HOOKS"
 bridge = "$BRIDGE"
-cfg = {
-    "version": 1,
-    "hooks": {
-        "beforeShellExecution": [
-            {"command": f"{bridge}/cursor_shell_hook.py"}
-        ],
-        "afterFileEdit": [
-            {"command": f"{bridge}/cursor_file_hook.py"}
-        ],
-        "stop": [
-            {"command": f"{bridge}/cursor_stop_hook.py"}
-        ]
-    }
+
+if os.path.exists(path):
+    with open(path) as f:
+        cfg = json.load(f)
+else:
+    cfg = {}
+
+if not isinstance(cfg, dict):
+    cfg = {}
+cfg.setdefault("version", 1)
+hooks = cfg.setdefault("hooks", {})
+
+managed_names = {
+    "cursor_shell_hook.py",
+    "cursor_file_hook.py",
+    "cursor_stop_hook.py",
 }
 
-with open("$CURSOR_HOOKS", "w") as f:
+def merge_hook(event, command):
+    existing = hooks.get(event, [])
+    if not isinstance(existing, list):
+        existing = []
+    kept = []
+    for item in existing:
+        item_command = item.get("command") if isinstance(item, dict) else None
+        if item_command and any(item_command.endswith("/" + name) for name in managed_names):
+            continue
+        kept.append(item)
+    kept.append({"command": command})
+    hooks[event] = kept
+
+merge_hook("beforeShellExecution", f"{bridge}/cursor_shell_hook.py")
+merge_hook("afterFileEdit", f"{bridge}/cursor_file_hook.py")
+merge_hook("stop", f"{bridge}/cursor_stop_hook.py")
+
+with open(path, "w") as f:
     json.dump(cfg, f, indent=2, ensure_ascii=False)
 
-print(f"Cursor hooks → $CURSOR_HOOKS")
+print(f"Cursor hooks → {path}")
 PYEOF
 
 echo ""

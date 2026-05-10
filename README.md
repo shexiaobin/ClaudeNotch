@@ -95,7 +95,7 @@ ClaudeNotch (Swift macOS App)
 
 ### 自动超时
 
-权限请求在 120 秒无操作后自动 Deny。
+权限请求在 5 秒无操作后自动 Allow。这是当前 v1 行为，适合减少编码流程阻塞；如果你希望更保守的策略，请在源码中调整 `autoTimeoutSec` 和超时回调行为后重新打包。
 
 ## 手动配置 Hooks
 
@@ -139,10 +139,22 @@ ClaudeNotch (Swift macOS App)
 ## 测试
 
 ```bash
+./ClaudeNotch/build.sh
+python3 -m py_compile bridge/*.py
 python3 bridge/test_bridge_e2e.py
 ```
 
-使用 mock socket 验证桥接脚本的协议正确性，不需要启动 Swift App。
+使用 mock socket 验证桥接脚本的协议正确性，不需要启动 Swift App。`test_bridge_e2e.py` 会创建 Unix socket；如果在沙盒环境遇到 `Operation not permitted`，请在真实终端中运行。
+
+## 发布验收
+
+发布 DMG 前建议完成以下检查：
+
+- 从 GitHub Release 下载 `ClaudeNotch-1.0-arm64.dmg`
+- 挂载 DMG，确认包含 `ClaudeNotch.app`、`Install Hooks.command` 和说明文件
+- 运行 `Install Hooks.command` 后，确认 Claude Code 与 Cursor hooks 指向 App 包内 `Contents/Resources/bridge`
+- 在一台刘海屏 MacBook 和一台非刘海或外接屏 Mac 上分别验证 idle pill、权限面板、拖拽复位和完成通知
+- 覆盖 Claude Code 的 PermissionRequest / Notification / Stop，以及 Cursor 的 beforeShellExecution / afterFileEdit / stop
 
 ## License
 
