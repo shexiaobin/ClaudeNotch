@@ -126,6 +126,10 @@ enum NotchPanelController {
     static var idleStateRef: IdlePillState { idleState }
 
     static func settlePetToIdle() {
+        // If a new permission popped the panel back open during the 1.2s settle delay,
+        // leave that .thinking mood alone — the new request still wants attention.
+        guard currentState != .expanded else { return }
+
         PetState.mood = .idle
         idleState.update(
             elapsed: elapsedString(),
@@ -134,6 +138,20 @@ enum NotchPanelController {
             sessionSources: sessionTracker.activeSources,
             sessionCount: sessionTracker.activeCount
         )
+        // Clear the "working" flag so PulsingDot (which loops a forever
+        // withAnimation on opacity) and the lingering lastActivity text both
+        // disappear — otherwise the idle pill keeps repainting and visibly
+        // flashes on macOS 26.
+        idleState.isWorking = false
+        idleState.lastActivity = ""
+
+        // Hard-freeze: kill ALL pet timers (bounce, blink, tail, walk). Each of
+        // those triggers a @Published change that marks the SwiftUI subtree
+        // dirty; combined with the visual-effect blur background and an NSPanel
+        // at .maximumWindow level on macOS 26, the redraws were visible as a
+        // full-island flicker after auto-allow. We accept losing the tail wag /
+        // blink during idle in exchange for a stable pill.
+        petAnim.stop()
     }
 
     fileprivate(set) static var currentState: PanelState = .hidden
@@ -518,9 +536,13 @@ enum NotchPanelController {
             backing: .buffered,
             defer: false
         )
-        // Use screenSaver level on notch Macs so pill appears above menu bar in notch area
+        // Use screenSaver level on notch Macs so pill appears above menu bar in
+        // notch area — but NOT .maximumWindow (= CGShieldingWindowLevel ~8500),
+        // which is reserved for system shielding (login / lock screen) and on
+        // macOS 26 fights with the window server, causing the panel to be
+        // periodically hidden/shown by the system.
         if let screen = NSScreen.main, ScreenNotchProfile(screen: screen).hasNotch {
-            pan.level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.maximumWindow)))
+            pan.level = .screenSaver
         } else {
             pan.level = .statusBar
         }
@@ -882,11 +904,15 @@ private struct PulsingDot: View {
             .fill(Color.green)
             .frame(width: 6, height: 6)
             .opacity(pulse ? 1.0 : 0.3)
-            .onAppear {
-                withAnimation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true)) {
-                    pulse = true
-                }
-            }
+            // Use value-driven animation so the repeatForever cycle
+            // attaches to `pulse` and is torn down cleanly when the
+            // view leaves the hierarchy. Using `withAnimation` inside
+            // `.onAppear` leaks the animation context into the parent
+            // and keeps re-rendering the entire pill on macOS 26.
+            .animation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true),
+                       value: pulse)
+            .onAppear { pulse = true }
+            .onDisappear { pulse = false }
     }
 }
 

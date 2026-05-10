@@ -173,7 +173,7 @@ python3 bridge/test_bridge_e2e.py
 
 发布 DMG 前建议完成以下检查：
 
-- 从 GitHub Release 下载 `ClaudeNotch-1.0.5-arm64.dmg`
+- 从 GitHub Release 下载 `ClaudeNotch-1.0.6-arm64.dmg`
 - 挂载 DMG，确认包含 `ClaudeNotch.app`、`Install Hooks.command` 和说明文件
 - 运行 `Install Hooks.command` 后，确认 Claude Code、Cursor 与 Codex hooks 指向 `/Applications/ClaudeNotch.app/Contents/Resources/bridge`
 - 在一台刘海屏 MacBook 和一台非刘海或外接屏 Mac 上分别验证 idle pill、权限面板、拖拽复位和完成通知

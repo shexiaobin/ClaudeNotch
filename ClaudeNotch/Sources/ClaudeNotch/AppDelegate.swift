@@ -184,6 +184,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     cwd: cwd, tool: toolName, emotion: .idle
                 )
                 self?.pending = nil
+                NotchPanelController.idleStateRef.isWorking = false
+                NotchPanelController.idleStateRef.lastActivity = ""
                 self?.updateStatusIcon("busy")
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
                     NotchPanelController.settlePetToIdle()
@@ -224,6 +226,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             )
             PetState.mood = .happy
             strongSelf.pending = nil
+            // Clear work flags BEFORE showing the idle pill, otherwise the
+            // PulsingDot is mounted with a repeatForever animation context
+            // that keeps re-rendering the parent pill forever (visible as a
+            // ~1s pulse on macOS 26 even after settle).
+            NotchPanelController.idleStateRef.isWorking = false
+            NotchPanelController.idleStateRef.lastActivity = ""
             if let screen = NSScreen.main {
                 NotchPanelController.showIdlePill(on: screen)
             }

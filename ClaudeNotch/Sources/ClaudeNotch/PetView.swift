@@ -173,37 +173,47 @@ final class PetAnimationState: ObservableObject {
         walkOffset = 0
         zzz = false
 
-        bounceTimer = Timer.scheduledTimer(withTimeInterval: 0.4, repeats: true) { [weak self] _ in
-            guard let s = self else { return }
-            if s.reaction != .none { return }
-            s.tick += 1
-            switch mood {
-            case .idle:
-                s.bounceOffset = 0
-            case .thinking:
-                s.bounceOffset = s.bounceOffset == 0 ? -2 : 0
-            case .happy:
-                s.bounceOffset = s.bounceOffset == 0 ? -3 : 0
-            case .sad:
-                s.bounceOffset = 0
-            case .sleeping:
-                s.bounceOffset = s.bounceOffset == 0 ? -1 : 0
-                s.zzz = s.tick % 4 < 2
+        // Skip the bounce timer for moods with no actual bounce — otherwise it
+        // re-publishes bounceOffset = 0 every 0.4s, marking the SwiftUI subtree
+        // dirty and forcing the idle pill to repaint forever (visible flicker
+        // on macOS 26).
+        if mood == .thinking || mood == .happy || mood == .sleeping {
+            bounceTimer = Timer.scheduledTimer(withTimeInterval: 0.4, repeats: true) { [weak self] _ in
+                guard let s = self else { return }
+                if s.reaction != .none { return }
+                s.tick += 1
+                switch mood {
+                case .idle, .sad:
+                    break
+                case .thinking:
+                    s.bounceOffset = s.bounceOffset == 0 ? -2 : 0
+                case .happy:
+                    s.bounceOffset = s.bounceOffset == 0 ? -3 : 0
+                case .sleeping:
+                    s.bounceOffset = s.bounceOffset == 0 ? -1 : 0
+                    s.zzz = s.tick % 4 < 2
+                }
             }
         }
 
-        blinkTimer = Timer.scheduledTimer(withTimeInterval: 2.5, repeats: true) { [weak self] _ in
-            guard let s = self else { return }
-            if mood == .sleeping || s.reaction != .none { return }
-            s.eyesClosed = true
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                if s.reaction == .none { s.eyesClosed = false }
+        // Blink + tail timers are also skipped for .idle / .sad. On macOS 26 the
+        // VisualEffectView background + NSPanel at .screenSaver level repaints
+        // the whole pill on every @Published willChange, producing a visible
+        // 0.6s pulse that looks like the island is appearing/disappearing.
+        if mood != .idle && mood != .sad {
+            blinkTimer = Timer.scheduledTimer(withTimeInterval: 2.5, repeats: true) { [weak self] _ in
+                guard let s = self else { return }
+                if mood == .sleeping || s.reaction != .none { return }
+                s.eyesClosed = true
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                    if s.reaction == .none { s.eyesClosed = false }
+                }
             }
-        }
 
-        tailTimer = Timer.scheduledTimer(withTimeInterval: 0.6, repeats: true) { [weak self] _ in
-            guard let s = self else { return }
-            s.tailAngle = s.tailAngle == 0 ? 20 : (s.tailAngle == 20 ? -10 : 0)
+            tailTimer = Timer.scheduledTimer(withTimeInterval: 0.6, repeats: true) { [weak self] _ in
+                guard let s = self else { return }
+                s.tailAngle = s.tailAngle == 0 ? 20 : (s.tailAngle == 20 ? -10 : 0)
+            }
         }
 
         if mood == .thinking {
