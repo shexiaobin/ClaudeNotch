@@ -17,6 +17,7 @@ python3 bridge/test_bridge_e2e.py
 - `build.sh` 成功生成 `ClaudeNotch/.build-local/ClaudeNotch`
 - Python bridge 全部通过语法编译
 - bridge E2E 覆盖 allow、deny、socket missing、invalid JSON、notification、stop、Cursor shell fallback、Codex source marker
+- 安装诊断覆盖 stale `/Volumes/...` 路径修复、保留用户已有 hook、三家 hooks 指向当前 bridge
 - 如果沙盒环境运行 `test_bridge_e2e.py` 出现 Unix socket `Operation not permitted`，改在真实终端运行
 
 ## Swift App 手动 QA
@@ -33,6 +34,8 @@ python3 bridge/test_bridge_e2e.py
 - Notification 更新 idle pill 或活动流
 - Stop 展示完成通知、更新状态、播放音效
 - Jump 能唤起 Cursor 或正在运行的终端
+- 菜单栏 `Run Diagnostics` 能显示 socket、bridge、hooks 状态
+- 菜单栏 `Repair Hooks` 能把 Claude Code、Cursor、Codex hooks 修到当前 `/Applications/ClaudeNotch.app`
 
 ## 真实集成 QA
 
@@ -87,11 +90,12 @@ Codex：
 
 DMG 安装：
 
-- 从 GitHub Release 下载 `ClaudeNotch-1.0.6-arm64.dmg`
+- 从 GitHub Release 下载 `ClaudeNotch-1.0.7-arm64.dmg`
 - 挂载后包含 `ClaudeNotch.app`、`Install Hooks.command`、说明文件
 - 运行 `Install Hooks.command` 后，ClaudeNotch.app 被安装到 `/Applications/ClaudeNotch.app`
 - hooks 指向 `/Applications/ClaudeNotch.app/Contents/Resources/bridge`
 - 卸载 DMG 后 Claude Code、Cursor、Codex hooks 仍可用
+- 有 `◉` 但完全不弹窗时，`Run Diagnostics` 能指出 hooks 缺失、旧路径或 socket 异常
 - 删除或移动 App 后，安装脚本能给出清晰错误
 
 已知发布限制：

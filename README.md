@@ -9,6 +9,7 @@ macOS 灵动岛风格的 AI 编码助手通知中心。将 Claude Code、Cursor 
 - **完成通知** — 音效提示 + 宠物表情变化
 - **多来源** — 同时显示 Claude Code、Cursor 和 Codex 的会话状态
 - **刘海屏适配** — 刘海屏 idle pill 贴着刘海下沿显示，展开面板自动避开刘海区域
+- **安装诊断** — 菜单栏内置 Run Diagnostics / Repair Hooks，定位跨电脑 hooks 失效问题
 
 ## 支持的 AI 编码工具
 
@@ -71,6 +72,7 @@ ClaudeNotch (Swift macOS App)
 | `cursor_stop_hook.py` | Cursor | 停止事件 |
 | `codex_permission_bridge.py` | Codex | 权限请求（阻塞等待审批） |
 | `codex_stop_bridge.py` | Codex | 停止事件 |
+| `install_hooks.py` | ClaudeNotch | 安装诊断与 hooks 修复 |
 
 ### ClaudeNotch/ — Swift macOS App
 
@@ -85,6 +87,17 @@ ClaudeNotch (Swift macOS App)
 | `SoundPlayer.swift` | 音效播放 |
 | `MarkdownView.swift` | Markdown 渲染 |
 | `TerminalJumper.swift` | 跳转到终端 |
+
+## 安装诊断
+
+如果换电脑后菜单栏已经出现 `◉`，但 Claude Code / Cursor / Codex 完全不弹窗，通常是 hooks 没写入、指向了旧 `/Volumes/...` 路径，或宿主工具还没重启。
+
+请点击菜单栏 `◉`：
+
+- `Run Diagnostics` — 检查 App socket、bridge 文件、三家 hooks 路径
+- `Repair Hooks` — 重新写入 hooks 到 `/Applications/ClaudeNotch.app/Contents/Resources/bridge`
+
+修复后需要重启 Cursor，并重新开启 Claude Code / Codex 会话。
 
 ## 快捷键
 
@@ -173,9 +186,10 @@ python3 bridge/test_bridge_e2e.py
 
 发布 DMG 前建议完成以下检查：
 
-- 从 GitHub Release 下载 `ClaudeNotch-1.0.6-arm64.dmg`
+- 从 GitHub Release 下载 `ClaudeNotch-1.0.7-arm64.dmg`
 - 挂载 DMG，确认包含 `ClaudeNotch.app`、`Install Hooks.command` 和说明文件
 - 运行 `Install Hooks.command` 后，确认 Claude Code、Cursor 与 Codex hooks 指向 `/Applications/ClaudeNotch.app/Contents/Resources/bridge`
+- 菜单栏 `Run Diagnostics` 应显示三家 hooks 指向当前 bridge；`Repair Hooks` 不应删除用户自己的非 ClaudeNotch hook
 - 在一台刘海屏 MacBook 和一台非刘海或外接屏 Mac 上分别验证 idle pill、权限面板、拖拽复位和完成通知
 - 覆盖 Claude Code 的 PermissionRequest / Notification / Stop、Cursor 的 beforeShellExecution / afterFileEdit / stop，以及 Codex 的 PermissionRequest / Stop
 

@@ -83,6 +83,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(resetItem)
 
         menu.addItem(NSMenuItem.separator())
+        let diagnoseItem = NSMenuItem(title: "Run Diagnostics", action: #selector(runDiagnostics(_:)), keyEquivalent: "")
+        diagnoseItem.target = self
+        menu.addItem(diagnoseItem)
+
+        let repairItem = NSMenuItem(title: "Repair Hooks", action: #selector(repairHooks(_:)), keyEquivalent: "")
+        repairItem.target = self
+        menu.addItem(repairItem)
+
+        menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(title: "Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
         statusItem?.menu = menu
     }
@@ -107,6 +116,87 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NotchPanelController.dismiss()
             NotchPanelController.showIdlePill(on: screen)
         }
+    }
+
+    @objc private func runDiagnostics(_ sender: NSMenuItem) {
+        runHookInstaller(mode: "diagnose", title: "ClaudeNotch Diagnostics")
+    }
+
+    @objc private func repairHooks(_ sender: NSMenuItem) {
+        runHookInstaller(mode: "repair", title: "ClaudeNotch Repair")
+    }
+
+    private func runHookInstaller(mode: String, title: String) {
+        guard let bridgeURL = bridgeDirectoryURL() else {
+            showAlert(title: title, message: "Cannot find bridge resources inside ClaudeNotch.app.")
+            return
+        }
+        if mode == "repair", Bundle.main.bundleURL.path.hasPrefix("/Volumes/") {
+            showAlert(
+                title: title,
+                message: "ClaudeNotch is running from a mounted DMG.\n\nMove ClaudeNotch.app to /Applications, launch it there, then run Repair Hooks again. Hooks must not point to /Volumes because that path disappears after ejecting the DMG."
+            )
+            return
+        }
+        let scriptURL = bridgeURL.appendingPathComponent("install_hooks.py")
+        guard FileManager.default.fileExists(atPath: scriptURL.path) else {
+            showAlert(title: title, message: "Missing installer helper:\n\(scriptURL.path)")
+            return
+        }
+
+        DispatchQueue.global(qos: .userInitiated).async { [socketPath] in
+            let proc = Process()
+            proc.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+            proc.arguments = [
+                "python3",
+                scriptURL.path,
+                mode,
+                "--bridge",
+                bridgeURL.path,
+                "--socket",
+                socketPath,
+            ]
+
+            let output = Pipe()
+            proc.standardOutput = output
+            proc.standardError = output
+            do {
+                try proc.run()
+                proc.waitUntilExit()
+                let data = output.fileHandleForReading.readDataToEndOfFile()
+                let text = String(data: data, encoding: .utf8) ?? ""
+                let suffix: String
+                if mode == "repair" {
+                    suffix = "\n\nRestart Cursor, Claude Code, and Codex sessions for hooks to reload."
+                } else {
+                    suffix = ""
+                }
+                DispatchQueue.main.async {
+                    self.showAlert(title: title, message: text + suffix)
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    self.showAlert(title: title, message: "Failed to run diagnostics:\n\(error.localizedDescription)")
+                }
+            }
+        }
+    }
+
+    private func bridgeDirectoryURL() -> URL? {
+        let candidates = [
+            Bundle.main.resourceURL?.appendingPathComponent("bridge"),
+            Bundle.main.bundleURL.appendingPathComponent("Contents/Resources/bridge"),
+        ].compactMap { $0 }
+        return candidates.first { FileManager.default.fileExists(atPath: $0.path) }
+    }
+
+    private func showAlert(title: String, message: String) {
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = message.isEmpty ? "(No output)" : message
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
     }
 
     private func appendHistory(_ tool: String, source: AgentSource, allowed: Bool) {

@@ -26,6 +26,7 @@ CURSOR_FILE = ROOT / "cursor_file_hook.py"
 CURSOR_STOP = ROOT / "cursor_stop_hook.py"
 CODEX_PERMISSION = ROOT / "codex_permission_bridge.py"
 CODEX_STOP = ROOT / "codex_stop_bridge.py"
+INSTALL_HOOKS = ROOT / "install_hooks.py"
 
 
 def read_exact(conn: socket.socket, n: int) -> bytes:
@@ -123,6 +124,25 @@ def sample_permission() -> dict[str, Any]:
 def assert_json(stdout: str) -> dict[str, Any]:
     assert stdout, "expected JSON stdout"
     return json.loads(stdout)
+
+
+def run_installer(mode: str, home: Path, bridge: Path = ROOT) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [
+            sys.executable,
+            str(INSTALL_HOOKS),
+            mode,
+            "--bridge",
+            str(bridge),
+            "--home",
+            str(home),
+            "--no-socket-check",
+            "--json",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
 
 
 def test_claude_permission_allow() -> None:
@@ -240,6 +260,41 @@ def test_cursor_stop_source_and_launch_context() -> None:
         assert event["launch_context"] == "terminal"
 
 
+def test_install_hooks_repairs_stale_paths_and_preserves_user_hooks() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        home = Path(tmp)
+        cursor_dir = home / ".cursor"
+        cursor_dir.mkdir()
+        cursor_hooks = cursor_dir / "hooks.json"
+        cursor_hooks.write_text(json.dumps({
+            "version": 1,
+            "hooks": {
+                "beforeShellExecution": [
+                    {"command": "/Volumes/ClaudeNotch 1.0.1/ClaudeNotch.app/Contents/Resources/bridge/cursor_shell_hook.py"},
+                    {"command": "/usr/local/bin/my-cursor-hook"},
+                ],
+            },
+        }))
+
+        repaired = run_installer("repair", home)
+        assert repaired.returncode == 0, repaired.stderr or repaired.stdout
+        report = assert_json(repaired.stdout)
+        assert report["tools"]["claude"]["ok"]
+        assert report["tools"]["cursor"]["ok"]
+        assert report["tools"]["codex"]["ok"]
+
+        after = json.loads(cursor_hooks.read_text())
+        commands = [item["command"] for item in after["hooks"]["beforeShellExecution"]]
+        assert "/usr/local/bin/my-cursor-hook" in commands
+        assert str(ROOT / "cursor_shell_hook.py") in commands
+        assert all("/Volumes/ClaudeNotch" not in command for command in commands)
+
+        diagnosed = run_installer("diagnose", home)
+        assert diagnosed.returncode == 0, diagnosed.stderr or diagnosed.stdout
+        diag = assert_json(diagnosed.stdout)
+        assert diag["ok"]
+
+
 def main() -> int:
     tests = [
         test_claude_permission_allow,
@@ -250,6 +305,7 @@ def main() -> int:
         test_cursor_shell_allow_deny_and_missing_socket,
         test_codex_permission_and_stop_source_marker,
         test_cursor_stop_source_and_launch_context,
+        test_install_hooks_repairs_stale_paths_and_preserves_user_hooks,
     ]
     for test in tests:
         test()
