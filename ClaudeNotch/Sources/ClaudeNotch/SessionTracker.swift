@@ -56,6 +56,7 @@ struct AgentSession {
 
 final class SessionTracker: ObservableObject {
     @Published var sessions: [String: AgentSession] = [:]
+    private let staleInterval: TimeInterval = 300
 
     var activeCount: Int {
         sessions.values.filter { $0.status != .completed }.count
@@ -79,16 +80,36 @@ final class SessionTracker: ObservableObject {
 
     func upsert(id: String, source: AgentSource, status: SessionStatus,
                 cwd: String, tool: String, emotion: PetMood) {
-        sessions[id] = AgentSession(
+        sessions[key(id: id, source: source)] = AgentSession(
             id: id, source: source, status: status,
             cwd: cwd, lastTool: tool, lastActivity: Date(), emotion: emotion
         )
         cleanStale()
     }
 
+    func completeIfActive(id: String, source: AgentSource,
+                          cwd: String, tool: String = "stop",
+                          emotion: PetMood = .happy) -> Bool {
+        cleanStale()
+        let sessionKey = key(id: id, source: source)
+        guard var session = sessions[sessionKey] else { return false }
+        guard session.status == .waiting || session.status == .active else { return false }
+
+        session.status = .completed
+        session.cwd = cwd
+        session.lastTool = tool
+        session.lastActivity = Date()
+        session.emotion = emotion
+        sessions[sessionKey] = session
+        return true
+    }
+
+    private func key(id: String, source: AgentSource) -> String {
+        "\(source.rawValue):\(id)"
+    }
 
     private func cleanStale() {
-        let cutoff = Date().addingTimeInterval(-300)
+        let cutoff = Date().addingTimeInterval(-staleInterval)
         sessions = sessions.filter {
             $0.value.lastActivity > cutoff || $0.value.status == .waiting
         }

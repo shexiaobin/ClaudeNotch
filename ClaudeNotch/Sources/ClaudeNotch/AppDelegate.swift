@@ -238,7 +238,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let source = detectSource(hookInput)
         let toolName = hookInput["tool_name"] as? String ?? "Unknown"
         let toolInput = hookInput["tool_input"] as? [String: Any] ?? [:]
-        let sessionId = hookInput["session_id"] as? String ?? "default"
+        let sessionId = hookInput["session_id"] as? String ?? "default-\(source.rawValue)"
         let cwd = hookInput["cwd"] as? String ?? ""
 
         // Session tracking + emotion analysis
@@ -308,7 +308,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             SoundPlayer.play(.allowed)
             strongSelf.pending?.completeAllow()
             strongSelf.appendHistory(toolName + " (auto)", source: source, allowed: true)
-            let sessionId = strongSelf.pending?.hookInput["session_id"] as? String ?? "default"
+            let sessionId = strongSelf.pending?.hookInput["session_id"] as? String ?? "default-\(source.rawValue)"
             let cwd = strongSelf.pending?.hookInput["cwd"] as? String ?? ""
             NotchPanelController.sessionTracker.upsert(
                 id: sessionId, source: source, status: .active,
@@ -364,12 +364,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let source = detectSourceFromEvent(stop)
             let launchContext = AgentLaunchContext(rawValue: stop["launch_context"] as? String)
             let cwd = stop["cwd"] as? String ?? ""
-            let sessionId = stop["session_id"] as? String ?? "default-\(source.rawValue)"
-
-            NotchPanelController.sessionTracker.upsert(
-                id: sessionId, source: source, status: .completed,
-                cwd: cwd, tool: "stop", emotion: .happy
-            )
+            guard let sessionId = stopSessionId(stop, source: source),
+                  NotchPanelController.sessionTracker.completeIfActive(
+                    id: sessionId,
+                    source: source,
+                    cwd: cwd
+                  ) else {
+                NSLog("ClaudeNotch [%@]: ignored orphan stop event", source.displayName)
+                return
+            }
 
             NSLog("ClaudeNotch [%@]: stopped", source.displayName)
             PetState.mood = .happy
@@ -393,6 +396,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             )
             DispatchQueue.main.asyncAfter(deadline: .now() + 5) { PetState.mood = .idle }
         }
+    }
+
+    private func stopSessionId(_ event: [String: Any], source: AgentSource) -> String? {
+        if let sessionId = event["session_id"] as? String, !sessionId.isEmpty {
+            return sessionId
+        }
+        if source == .codex { return nil }
+        return "default-\(source.rawValue)"
     }
 
     // MARK: - Activity detail extraction
