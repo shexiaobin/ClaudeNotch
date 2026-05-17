@@ -246,6 +246,70 @@ def test_codex_permission_and_stop_source_marker() -> None:
         assert server.messages[1]["stop_event"]["launch_context"] == "terminal"
 
 
+def test_codex_background_permission_is_suppressed() -> None:
+    background = {
+        "session_id": "ambient-meta-ads",
+        "cwd": "/",
+        "hook_event_name": "PermissionRequest",
+        "tool_name": "mcp__codex_apps__meta_ads_mcp_mayer._ads_get_ad_entities",
+        "tool_input": {
+            "fields": ["delivery", "objective", "amount_spent", "results", "cost_per_result"],
+            "filtering": [{"field": "campaign.delivery", "operator": "IN", "value": ["active"]}],
+        },
+    }
+
+    result = run_hook(
+        CODEX_PERMISSION,
+        background,
+        "/tmp/claude-notch-missing.sock",
+        {"CLAUDE_NOTCH_CODEX_TARGET": "app"},
+    )
+    assert result.returncode == 0, result.stderr
+    decision = assert_json(result.stdout)["hookSpecificOutput"]["decision"]
+    assert decision == {"behavior": "allow"}
+
+
+def test_codex_project_permission_still_reaches_ui() -> None:
+    project = {
+        **sample_permission(),
+        "cwd": "/tmp/project",
+        "tool_name": "mcp__codex_apps__meta_ads_mcp_mayer._ads_get_ad_entities",
+        "tool_input": {"fields": ["delivery"]},
+    }
+
+    with MockServer([{"behavior": "deny", "message": "Review first"}]) as server:
+        result = run_hook(
+            CODEX_PERMISSION,
+            project,
+            server.sock_path,
+            {"CLAUDE_NOTCH_CODEX_TARGET": "app"},
+        )
+        assert result.returncode == 0, result.stderr
+        decision = assert_json(result.stdout)["hookSpecificOutput"]["decision"]
+        assert decision == {"behavior": "deny", "message": "Review first"}
+        assert server.messages[0]["hook_input"]["source"] == "codex"
+
+
+def test_codex_background_filter_can_be_disabled() -> None:
+    background = {
+        "cwd": "/",
+        "hook_event_name": "PermissionRequest",
+        "tool_name": "mcp__codex_apps__meta_ads_mcp_mayer._ads_get_ad_entities",
+        "tool_input": {"fields": ["amount_spent"]},
+    }
+
+    result = run_hook(
+        CODEX_PERMISSION,
+        background,
+        "/tmp/claude-notch-missing.sock",
+        {
+            "CLAUDE_NOTCH_CODEX_TARGET": "app",
+            "CLAUDE_NOTCH_CODEX_BACKGROUND_FILTER": "0",
+        },
+    )
+    assert result.returncode != 0
+
+
 def test_cursor_stop_source_and_launch_context() -> None:
     with MockServer([{"ok": True}]) as server:
         stop = run_hook(
@@ -304,6 +368,9 @@ def main() -> int:
         test_notification_and_stop_ack,
         test_cursor_shell_allow_deny_and_missing_socket,
         test_codex_permission_and_stop_source_marker,
+        test_codex_background_permission_is_suppressed,
+        test_codex_project_permission_still_reaches_ui,
+        test_codex_background_filter_can_be_disabled,
         test_cursor_stop_source_and_launch_context,
         test_install_hooks_repairs_stale_paths_and_preserves_user_hooks,
     ]

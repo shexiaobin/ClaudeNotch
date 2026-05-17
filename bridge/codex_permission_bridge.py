@@ -11,9 +11,98 @@ import json
 import os
 import socket
 import sys
+from pathlib import Path
+from typing import Any
 
 from claude_permission_bridge import TIMEOUT_SEC, framed_send_recv, socket_path
 from launch_context import detect_launch_context
+
+
+BACKGROUND_MARKERS = (
+    "ambient suggestion",
+    "ambient-suggestions",
+    "classify codex ambient",
+    "analytics-default-enabled",
+    "background suggestion",
+)
+
+BACKGROUND_BOOLEAN_KEYS = (
+    "ambient",
+    "background",
+    "is_ambient",
+    "is_background",
+    "is_background_task",
+)
+
+
+def _allow_output() -> str:
+    return json.dumps(
+        {
+            "hookSpecificOutput": {
+                "hookEventName": "PermissionRequest",
+                "decision": {"behavior": "allow"},
+            }
+        },
+        ensure_ascii=False,
+    )
+
+
+def _payload_text(value: Any) -> str:
+    try:
+        return json.dumps(value, ensure_ascii=False, sort_keys=True).lower()
+    except TypeError:
+        return str(value).lower()
+
+
+def _tool_name(hook_input: dict[str, Any]) -> str:
+    return str(
+        hook_input.get("tool_name")
+        or hook_input.get("tool")
+        or hook_input.get("toolName")
+        or ""
+    )
+
+
+def _cwd(hook_input: dict[str, Any]) -> str:
+    return str(
+        hook_input.get("cwd")
+        or hook_input.get("working_directory")
+        or hook_input.get("workingDirectory")
+        or ""
+    )
+
+
+def is_background_permission(hook_input: dict[str, Any]) -> bool:
+    """Return True for Codex app background requests that should not interrupt.
+
+    Codex Desktop can run ambient suggestions and analytics-adjacent background
+    turns through the same PermissionRequest hook as user-visible work. The
+    hook payload does not currently expose one stable "background" flag, so
+    this keeps the filter intentionally narrow and explainable.
+    """
+    if os.environ.get("CLAUDE_NOTCH_CODEX_BACKGROUND_FILTER", "1") in {"0", "false", "False"}:
+        return False
+
+    if hook_input.get("launch_context") != "app":
+        return False
+
+    for key in BACKGROUND_BOOLEAN_KEYS:
+        if hook_input.get(key) is True:
+            return True
+
+    text = _payload_text(hook_input)
+    if any(marker in text for marker in BACKGROUND_MARKERS):
+        return True
+
+    cwd = _cwd(hook_input)
+    tool = _tool_name(hook_input)
+    home = str(Path.home())
+    if cwd == "/" and tool.startswith("mcp__codex_apps__"):
+        return True
+    if cwd.startswith(f"{home}/.codex/ambient-suggestions"):
+        return True
+
+    return False
 
 
 def main() -> int:
@@ -29,6 +118,15 @@ def main() -> int:
 
     hook_input["source"] = "codex"
     hook_input["launch_context"] = detect_launch_context("codex")
+
+    if is_background_permission(hook_input):
+        print(
+            "codex_permission_bridge: allowed background Codex request without UI",
+            file=sys.stderr,
+        )
+        sys.stdout.write(_allow_output())
+        sys.stdout.flush()
+        return 0
 
     path = socket_path()
     if not os.path.exists(path):
