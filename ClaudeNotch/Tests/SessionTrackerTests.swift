@@ -43,6 +43,23 @@ struct SessionTrackerTests {
         )
 
         tracker.upsert(
+            id: "codex-without-stop-session-id",
+            source: .codex,
+            status: .active,
+            cwd: "/tmp",
+            tool: "Bash",
+            emotion: .idle
+        )
+        expect(
+            tracker.completeMostRecentActive(source: .codex, cwd: "/tmp") == true,
+            "codex stop without session_id should complete a recent active session"
+        )
+        expect(
+            tracker.completeMostRecentActive(source: .codex, cwd: "/tmp") == false,
+            "duplicate codex stop without session_id should be ignored"
+        )
+
+        tracker.upsert(
             id: "same-id",
             source: .codex,
             status: .active,

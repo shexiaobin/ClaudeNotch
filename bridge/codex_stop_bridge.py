@@ -3,19 +3,10 @@
 from __future__ import annotations
 
 import json
-import os
-import socket
-import struct
 import sys
-from pathlib import Path
 
+from event_bridge import send_event
 from launch_context import detect_launch_context
-
-DEFAULT_REL = Path.home() / ".claude-notch" / "bridge.sock"
-
-
-def socket_path() -> str:
-    return os.environ.get("CLAUDE_NOTCH_SOCKET", str(DEFAULT_REL))
 
 
 def main() -> int:
@@ -28,25 +19,14 @@ def main() -> int:
         return 0
 
     hook_input["source"] = "codex"
+    if not hook_input.get("session_id"):
+        for key in ("conversation_id", "thread_id", "turn_id"):
+            if hook_input.get(key):
+                hook_input["session_id"] = hook_input[key]
+                break
     hook_input["launch_context"] = detect_launch_context("codex")
 
-    path = socket_path()
-    if not os.path.exists(path):
-        return 0
-
-    try:
-        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
-            s.settimeout(5.0)
-            s.connect(path)
-            msg = {"stop_event": hook_input}
-            payload = json.dumps(msg, ensure_ascii=False).encode("utf-8")
-            s.sendall(struct.pack(">I", len(payload)) + payload)
-            hdr = s.recv(4)
-            if len(hdr) == 4:
-                (n,) = struct.unpack(">I", hdr)
-                s.recv(n)
-    except OSError:
-        pass
+    send_event({"stop_event": hook_input}, "codex_stop_bridge")
     return 0
 
 

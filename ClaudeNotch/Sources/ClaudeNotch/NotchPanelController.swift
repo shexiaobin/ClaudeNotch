@@ -112,7 +112,6 @@ enum NotchPanelController {
     private static var sessionStart: Date?
     private static var refreshTimer: Timer?
     private static var localKeyMonitor: Any?
-    private static var globalKeyMonitor: Any?
     /// Called when ESC is pressed while expanded
     static var onEscAction: (() -> Void)?
     /// Called when Enter is pressed while expanded (permission allow)
@@ -458,15 +457,10 @@ enum NotchPanelController {
             return event
         }
 
-        globalKeyMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { event in
-            guard currentState == .expanded else { return }
-            DispatchQueue.main.async { handleKeyEvent(event.keyCode) }
-        }
     }
 
     private static func removeKeyMonitor() {
         if let m = localKeyMonitor { NSEvent.removeMonitor(m); localKeyMonitor = nil }
-        if let m = globalKeyMonitor { NSEvent.removeMonitor(m); globalKeyMonitor = nil }
     }
 
     private static func panelOrigin(for size: NSSize, state: PanelState, on screen: NSScreen) -> NSPoint {

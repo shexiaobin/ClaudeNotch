@@ -364,12 +364,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let source = detectSourceFromEvent(stop)
             let launchContext = AgentLaunchContext(rawValue: stop["launch_context"] as? String)
             let cwd = stop["cwd"] as? String ?? ""
-            guard let sessionId = stopSessionId(stop, source: source),
-                  NotchPanelController.sessionTracker.completeIfActive(
+            let didComplete: Bool
+            if let sessionId = stopSessionId(stop, source: source) {
+                didComplete = NotchPanelController.sessionTracker.completeIfActive(
                     id: sessionId,
                     source: source,
                     cwd: cwd
-                  ) else {
+                )
+            } else {
+                didComplete = NotchPanelController.sessionTracker.completeMostRecentActive(
+                    source: source,
+                    cwd: cwd
+                )
+            }
+            guard didComplete else {
                 NSLog("ClaudeNotch [%@]: ignored orphan stop event", source.displayName)
                 return
             }
@@ -401,6 +409,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func stopSessionId(_ event: [String: Any], source: AgentSource) -> String? {
         if let sessionId = event["session_id"] as? String, !sessionId.isEmpty {
             return sessionId
+        }
+        if let conversationId = event["conversation_id"] as? String, !conversationId.isEmpty {
+            return conversationId
+        }
+        if let threadId = event["thread_id"] as? String, !threadId.isEmpty {
+            return threadId
         }
         if source == .codex { return nil }
         return "default-\(source.rawValue)"

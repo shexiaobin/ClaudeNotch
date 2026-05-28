@@ -95,17 +95,37 @@ final class SessionTracker: ObservableObject {
         guard var session = sessions[sessionKey] else { return false }
         guard session.status == .waiting || session.status == .active else { return false }
 
-        session.status = .completed
-        session.cwd = cwd
-        session.lastTool = tool
-        session.lastActivity = Date()
-        session.emotion = emotion
-        sessions[sessionKey] = session
+        complete(session: &session, key: sessionKey, cwd: cwd, tool: tool, emotion: emotion)
+        return true
+    }
+
+    func completeMostRecentActive(source: AgentSource,
+                                  cwd: String, tool: String = "stop",
+                                  emotion: PetMood = .happy) -> Bool {
+        cleanStale()
+        guard let latest = sessions
+            .filter({ $0.value.source == source && ($0.value.status == .waiting || $0.value.status == .active) })
+            .max(by: { $0.value.lastActivity < $1.value.lastActivity }) else {
+            return false
+        }
+
+        var session = latest.value
+        complete(session: &session, key: latest.key, cwd: cwd, tool: tool, emotion: emotion)
         return true
     }
 
     private func key(id: String, source: AgentSource) -> String {
         "\(source.rawValue):\(id)"
+    }
+
+    private func complete(session: inout AgentSession, key: String,
+                          cwd: String, tool: String, emotion: PetMood) {
+        session.status = .completed
+        session.cwd = cwd
+        session.lastTool = tool
+        session.lastActivity = Date()
+        session.emotion = emotion
+        sessions[key] = session
     }
 
     private func cleanStale() {

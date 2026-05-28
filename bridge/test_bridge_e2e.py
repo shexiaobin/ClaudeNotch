@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import socket
 import struct
 import subprocess
@@ -145,6 +146,26 @@ def run_installer(mode: str, home: Path, bridge: Path = ROOT) -> subprocess.Comp
     )
 
 
+def run_diagnose_with_socket(home: Path, socket_path: Path) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [
+            sys.executable,
+            str(INSTALL_HOOKS),
+            "diagnose",
+            "--bridge",
+            str(ROOT),
+            "--home",
+            str(home),
+            "--socket",
+            str(socket_path),
+            "--json",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+
+
 def test_claude_permission_allow() -> None:
     with MockServer([{"behavior": "allow"}]) as server:
         result = run_hook(CLAUDE_PERMISSION, sample_permission(), server.sock_path)
@@ -188,6 +209,25 @@ def test_notification_and_stop_ack() -> None:
         assert "stop_event" in server.messages[1]
         assert server.messages[2]["notification"]["hook_event_name"] == "afterFileEdit"
         assert "stop_event" in server.messages[3]
+
+
+def test_nonblocking_bridge_debug_reports_socket_failure() -> None:
+    missing = run_hook(
+        CLAUDE_NOTIFICATION,
+        {"hook_event_name": "Notification"},
+        "/tmp/claude-notch-missing.sock",
+    )
+    assert missing.returncode == 0
+    assert missing.stderr == ""
+
+    debug = run_hook(
+        CLAUDE_NOTIFICATION,
+        {"hook_event_name": "Notification"},
+        "/tmp/claude-notch-missing.sock",
+        {"CLAUDE_NOTCH_BRIDGE_DEBUG": "1"},
+    )
+    assert debug.returncode == 0
+    assert "socket missing" in debug.stderr
 
 
 def test_cursor_shell_allow_deny_and_missing_socket() -> None:
@@ -237,13 +277,14 @@ def test_codex_permission_and_stop_source_marker() -> None:
 
         stop = run_hook(
             CODEX_STOP,
-            {"hook_event_name": "Stop"},
+            {"hook_event_name": "Stop", "thread_id": "codex-thread"},
             server.sock_path,
             {"CLAUDE_NOTCH_CODEX_TARGET": "terminal"},
         )
         assert stop.returncode == 0
         assert server.messages[1]["stop_event"]["source"] == "codex"
         assert server.messages[1]["stop_event"]["launch_context"] == "terminal"
+        assert server.messages[1]["stop_event"]["session_id"] == "codex-thread"
 
 
 def test_codex_background_permission_is_suppressed() -> None:
@@ -322,6 +363,7 @@ def test_cursor_stop_source_and_launch_context() -> None:
         event = server.messages[0]["stop_event"]
         assert event["source"] == "cursor"
         assert event["launch_context"] == "terminal"
+        assert event["session_id"] == "cursor-test"
 
 
 def test_install_hooks_repairs_stale_paths_and_preserves_user_hooks() -> None:
@@ -359,6 +401,71 @@ def test_install_hooks_repairs_stale_paths_and_preserves_user_hooks() -> None:
         assert diag["ok"]
 
 
+def test_diagnose_requires_connectable_socket() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        home = Path(tmp)
+        repaired = run_installer("repair", home)
+        assert repaired.returncode == 0, repaired.stderr or repaired.stdout
+
+        stale_socket = home / ".claude-notch" / "bridge.sock"
+        stale_socket.parent.mkdir(parents=True)
+        stale_socket.write_text("stale")
+
+        diagnosed = run_diagnose_with_socket(home, stale_socket)
+        assert diagnosed.returncode == 1
+        report = assert_json(diagnosed.stdout)
+        assert report["socket"]["exists"]
+        assert not report["socket"]["connectable"]
+        assert not report["ok"]
+
+
+def test_repair_backs_up_invalid_json_before_overwrite() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        home = Path(tmp)
+        cursor_dir = home / ".cursor"
+        cursor_dir.mkdir()
+        cursor_hooks = cursor_dir / "hooks.json"
+        cursor_hooks.write_text("{ broken")
+
+        repaired = run_installer("repair", home)
+        assert repaired.returncode == 0, repaired.stderr or repaired.stdout
+        backups = list(cursor_dir.glob("hooks.json.claudenotch-bak-*"))
+        assert len(backups) == 1
+        assert backups[0].read_text() == "{ broken"
+        repaired_hooks = json.loads(cursor_hooks.read_text())
+        commands = [item["command"] for item in repaired_hooks["hooks"]["beforeShellExecution"]]
+        assert str(ROOT / "cursor_shell_hook.py") in commands
+
+
+def test_diagnose_requires_executable_bridge_files() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        home = Path(tmp) / "home"
+        bridge = Path(tmp) / "bridge"
+        shutil.copytree(ROOT, bridge)
+        (bridge / "claude_notification_bridge.py").chmod(0o644)
+
+        repaired = run_installer("repair", home, bridge)
+        assert repaired.returncode == 0, repaired.stderr or repaired.stdout
+
+        (bridge / "claude_notification_bridge.py").chmod(0o644)
+        diagnosed = run_installer("diagnose", home, bridge)
+        assert diagnosed.returncode == 1
+        report = assert_json(diagnosed.stdout)
+        assert not report["bridge_files"]["claude_notification_bridge.py"]["executable"]
+        assert not report["ok"]
+
+
+def test_repair_returns_nonzero_when_bridge_is_incomplete() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        home = Path(tmp) / "home"
+        bridge = Path(tmp) / "bridge"
+        bridge.mkdir()
+        repaired = run_installer("repair", home, bridge)
+        assert repaired.returncode == 1
+        report = assert_json(repaired.stdout)
+        assert not report["ok"]
+
+
 def main() -> int:
     tests = [
         test_claude_permission_allow,
@@ -366,6 +473,7 @@ def main() -> int:
         test_claude_permission_socket_missing,
         test_invalid_json_fallbacks,
         test_notification_and_stop_ack,
+        test_nonblocking_bridge_debug_reports_socket_failure,
         test_cursor_shell_allow_deny_and_missing_socket,
         test_codex_permission_and_stop_source_marker,
         test_codex_background_permission_is_suppressed,
@@ -373,6 +481,10 @@ def main() -> int:
         test_codex_background_filter_can_be_disabled,
         test_cursor_stop_source_and_launch_context,
         test_install_hooks_repairs_stale_paths_and_preserves_user_hooks,
+        test_diagnose_requires_connectable_socket,
+        test_repair_backs_up_invalid_json_before_overwrite,
+        test_diagnose_requires_executable_bridge_files,
+        test_repair_returns_nonzero_when_bridge_is_incomplete,
     ]
     for test in tests:
         test()

@@ -10,6 +10,7 @@ final class UnixSocketServer {
     private let onEvent: ([String: Any]) -> Void
     private var listenFD: Int32 = -1
     private var acceptQueue: DispatchQueue
+    private var connectionQueue: DispatchQueue
 
     init(
         path: String,
@@ -20,9 +21,22 @@ final class UnixSocketServer {
         self.onPermission = onPermission
         self.onEvent = onEvent
         self.acceptQueue = DispatchQueue(label: "claude-notch.accept", qos: .userInitiated)
+        self.connectionQueue = DispatchQueue(label: "claude-notch.connection", qos: .userInitiated, attributes: .concurrent)
     }
 
     func start() throws {
+        let maxSocketPathBytes = 103
+        let pathByteCount = path.lengthOfBytes(using: .utf8)
+        guard pathByteCount <= maxSocketPathBytes else {
+            throw NSError(
+                domain: "ClaudeNotchSocket",
+                code: 4,
+                userInfo: [
+                    NSLocalizedDescriptionKey:
+                        "Unix socket path is too long (\(pathByteCount) bytes, max \(maxSocketPathBytes)): \(path)"
+                ]
+            )
+        }
         unlink(path)
         let fd = socket(AF_UNIX, SOCK_STREAM, 0)
         guard fd >= 0 else { throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno)) }
@@ -30,7 +44,7 @@ final class UnixSocketServer {
         var addr = sockaddr_un()
         addr.sun_family = sa_family_t(AF_UNIX)
         let pathBytes = path.utf8CString
-        let sunPathCap = 103
+        let sunPathCap = maxSocketPathBytes
         withUnsafeMutablePointer(to: &addr.sun_path.0) { ptr in
             var i = 0
             while i < sunPathCap && pathBytes[i] != 0 {
@@ -66,7 +80,9 @@ final class UnixSocketServer {
             while true {
                 let conn = accept(s.listenFD, nil, nil)
                 guard conn >= 0 else { break }
-                s.handleConnection(conn)
+                s.connectionQueue.async {
+                    s.handleConnection(conn)
+                }
             }
         }
     }

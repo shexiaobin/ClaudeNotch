@@ -11,7 +11,8 @@ final class ChatEngine: ObservableObject {
     @Published var isLoading: Bool = false
 
     private var lastCwd: String = NSHomeDirectory()
-    private let claudePath: String
+    private let executablePath: String
+    private let baseArguments: [String]
 
     init() {
         let candidates = [
@@ -19,8 +20,13 @@ final class ChatEngine: ObservableObject {
             "/usr/local/bin/claude",
             "/opt/homebrew/bin/claude",
         ]
-        claudePath = candidates.first(where: { FileManager.default.isExecutableFile(atPath: $0) })
-            ?? "claude"
+        if let claudePath = candidates.first(where: { FileManager.default.isExecutableFile(atPath: $0) }) {
+            executablePath = claudePath
+            baseArguments = []
+        } else {
+            executablePath = "/usr/bin/env"
+            baseArguments = ["claude"]
+        }
     }
 
     func updateCwd(_ cwd: String) {
@@ -51,8 +57,8 @@ final class ChatEngine: ObservableObject {
 
     private func callClaude(_ prompt: String) -> String {
         let proc = Process()
-        proc.executableURL = URL(fileURLWithPath: claudePath)
-        proc.arguments = ["-p", prompt, "--output-format", "text"]
+        proc.executableURL = URL(fileURLWithPath: executablePath)
+        proc.arguments = baseArguments + ["-p", prompt, "--output-format", "text"]
         proc.currentDirectoryURL = URL(fileURLWithPath: lastCwd)
 
         var env = ProcessInfo.processInfo.environment

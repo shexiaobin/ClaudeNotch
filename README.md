@@ -186,7 +186,7 @@ python3 bridge/test_bridge_e2e.py
 
 发布 DMG 前建议完成以下检查：
 
-- 从 GitHub Release 下载 `ClaudeNotch-1.0.9-arm64.dmg`
+- 从 GitHub Release 下载 `ClaudeNotch-1.0.10-arm64.dmg`
 - 挂载 DMG，确认包含 `ClaudeNotch.app`、`Install Hooks.command` 和说明文件
 - 运行 `Install Hooks.command` 后，确认 Claude Code、Cursor 与 Codex hooks 指向 `/Applications/ClaudeNotch.app/Contents/Resources/bridge`
 - 菜单栏 `Run Diagnostics` 应显示三家 hooks 指向当前 bridge；`Repair Hooks` 不应删除用户自己的非 ClaudeNotch hook

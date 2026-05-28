@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 import json
 import os
+import shutil
 import socket
 import sys
 from pathlib import Path
@@ -30,7 +32,7 @@ CODEX_MANAGED = {
 REQUIRED_BRIDGE = sorted(
     CLAUDE_MANAGED
     | CURSOR_MANAGED
-    | {"codex_permission_bridge.py", "codex_stop_bridge.py", "install_hooks.py", "launch_context.py"}
+    | {"codex_permission_bridge.py", "codex_stop_bridge.py", "event_bridge.py", "install_hooks.py", "launch_context.py"}
 )
 
 
@@ -46,15 +48,37 @@ def default_socket(home: Path) -> Path:
     return Path(os.environ.get("CLAUDE_NOTCH_SOCKET", str(home / ".claude-notch" / "bridge.sock")))
 
 
-def read_json(path: Path) -> dict[str, Any]:
+def backup_config(path: Path, reason: str) -> Path | None:
+    if not path.exists():
+        return None
+    timestamp = dt.datetime.now().strftime("%Y%m%d%H%M%S")
+    backup = path.with_name(f"{path.name}.claudenotch-bak-{timestamp}-{os.getpid()}")
+    try:
+        shutil.copy2(path, backup)
+        print(f"ClaudeNotch: backed up {reason} config to {backup}", file=sys.stderr)
+        return backup
+    except OSError as exc:
+        print(f"ClaudeNotch: failed to back up {path}: {exc}", file=sys.stderr)
+        raise
+
+
+def read_json(path: Path, backup_invalid: bool = False) -> dict[str, Any]:
     if not path.exists():
         return {}
     try:
         with path.open() as f:
             data = json.load(f)
-    except (OSError, json.JSONDecodeError):
+    except json.JSONDecodeError:
+        if backup_invalid:
+            backup_config(path, "invalid JSON")
         return {}
-    return data if isinstance(data, dict) else {}
+    except OSError:
+        return {}
+    if isinstance(data, dict):
+        return data
+    if backup_invalid:
+        backup_config(path, "non-object JSON")
+    return {}
 
 
 def write_json(path: Path, data: dict[str, Any]) -> None:
@@ -87,7 +111,7 @@ def nested_commands(item: Any) -> list[str]:
 
 def repair_claude(home: Path, bridge: Path) -> None:
     path = home / ".claude" / "settings.json"
-    cfg = read_json(path)
+    cfg = read_json(path, backup_invalid=True)
     hooks = cfg.setdefault("hooks", {})
 
     def merge(event: str, entry: dict[str, Any]) -> None:
@@ -116,7 +140,7 @@ def repair_claude(home: Path, bridge: Path) -> None:
 
 def repair_cursor(home: Path, bridge: Path) -> None:
     path = home / ".cursor" / "hooks.json"
-    cfg = read_json(path)
+    cfg = read_json(path, backup_invalid=True)
     cfg.setdefault("version", 1)
     hooks = cfg.setdefault("hooks", {})
 
@@ -141,7 +165,7 @@ def repair_cursor(home: Path, bridge: Path) -> None:
 
 def repair_codex(home: Path, bridge: Path) -> None:
     path = home / ".codex" / "hooks.json"
-    cfg = read_json(path)
+    cfg = read_json(path, backup_invalid=True)
     hooks = cfg.setdefault("hooks", {})
 
     def merge(event: str, entry: dict[str, Any]) -> None:
@@ -224,9 +248,9 @@ def diagnose(home: Path, bridge: Path, socket_path: Path, check_socket: bool = T
         CODEX_MANAGED,
     )
 
-    ok = all(info["exists"] for info in result["bridge_files"].values())
+    ok = all(info["exists"] and info["executable"] for info in result["bridge_files"].values())
     if check_socket:
-        ok = ok and result["socket"]["exists"]
+        ok = ok and result["socket"]["exists"] and result["socket"]["connectable"]
     ok = ok and all(tool["ok"] for tool in result["tools"].values())
     result["ok"] = ok
     return result
@@ -309,8 +333,15 @@ def render_text(report: dict[str, Any]) -> str:
     lines.append("")
 
     missing = [name for name, info in report["bridge_files"].items() if not info["exists"]]
+    not_executable = [
+        name
+        for name, info in report["bridge_files"].items()
+        if info["exists"] and not info["executable"]
+    ]
     if missing:
         lines.append("Bridge files: MISSING " + ", ".join(missing))
+    elif not_executable:
+        lines.append("Bridge files: NOT EXECUTABLE " + ", ".join(not_executable))
     else:
         lines.append("Bridge files: OK")
 
@@ -355,7 +386,7 @@ def main() -> int:
         print(json.dumps(report, ensure_ascii=False, indent=2))
     else:
         print(render_text(report))
-    return 0 if report["ok"] or args.mode == "repair" else 1
+    return 0 if report["ok"] else 1
 
 
 if __name__ == "__main__":
