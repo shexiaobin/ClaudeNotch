@@ -57,6 +57,143 @@ private struct NotchBackground<S: InsettableShape>: View {
     }
 }
 
+/// Panel background: solid-black notch-extension shape when fused with a
+/// physical notch (topInset > 0), frosted rounded rect otherwise.
+private struct FusableBackground: View {
+    let topInset: CGFloat
+    let cornerRadius: CGFloat
+
+    var body: some View {
+        if topInset > 0 {
+            NotchFusionShape(bottomRadius: cornerRadius).fill(Color.black)
+        } else {
+            NotchBackground(shape: RoundedRectangle(cornerRadius: cornerRadius))
+        }
+    }
+}
+
+// MARK: - Notch geometry (exact hardware cutout via safeAreaInsets)
+
+struct NotchGeometry {
+    let screen: NSScreen
+    let hasNotch: Bool
+    let isFakeNotch: Bool
+    /// Physical cutout size in points; zero on screens without a notch.
+    let notchWidth: CGFloat
+    let notchHeight: CGFloat
+
+    /// Outward fillet where the fusion shape meets the screen's top edge.
+    static let topFillet: CGFloat = 6
+    /// Visible strip below the notch that holds idle pill content.
+    static let idleStripHeight: CGFloat = 34
+
+    init(screen: NSScreen) {
+        self.screen = screen
+        // Debug aid for developing on non-notch Macs: simulate a notch on any
+        // screen, e.g. CLAUDE_NOTCH_FAKE_NOTCH=200x32 (width x height in points).
+        if let fake = ProcessInfo.processInfo.environment["CLAUDE_NOTCH_FAKE_NOTCH"],
+           !fake.isEmpty,
+           let main = NSScreen.main,
+           main === screen {
+            let parts = fake.lowercased().split(separator: "x").compactMap { Double($0) }
+            hasNotch = true
+            isFakeNotch = true
+            notchWidth = parts.count == 2 ? CGFloat(parts[0]) : 200
+            notchHeight = parts.count == 2 ? CGFloat(parts[1]) : 32
+            return
+        }
+        let safeTop = Self.runtimeSafeAreaTop(for: screen)
+        if safeTop > 0 {
+            hasNotch = true
+            isFakeNotch = false
+            notchHeight = safeTop
+            let left = Self.runtimeAuxiliaryTopWidth(for: screen, key: "auxiliaryTopLeftArea")
+            let right = Self.runtimeAuxiliaryTopWidth(for: screen, key: "auxiliaryTopRightArea")
+            let width = (left > 0 || right > 0) ? screen.frame.width - left - right : 200
+            notchWidth = width > 0 && width < screen.frame.width ? width : 200
+        } else {
+            // Notch hardware ships with macOS 12+, so pre-12 systems never have one.
+            hasNotch = false
+            isFakeNotch = false
+            notchWidth = 0
+            notchHeight = 0
+        }
+    }
+
+    private static func runtimeSafeAreaTop(for screen: NSScreen) -> CGFloat {
+        let selector = NSSelectorFromString("safeAreaInsets")
+        guard screen.responds(to: selector),
+              let value = screen.value(forKey: "safeAreaInsets") as? NSValue else {
+            return 0
+        }
+        return value.edgeInsetsValue.top
+    }
+
+    private static func runtimeAuxiliaryTopWidth(for screen: NSScreen, key: String) -> CGFloat {
+        let selector = NSSelectorFromString(key)
+        guard screen.responds(to: selector),
+              let value = screen.value(forKey: key) as? NSValue else {
+            return 0
+        }
+        return value.rectValue.width
+    }
+
+    func idleSize(petEnabled: Bool) -> NSSize {
+        if hasNotch {
+            return NSSize(width: notchWidth + 2 * Self.topFillet,
+                          height: notchHeight + Self.idleStripHeight)
+        }
+        return NSSize(width: petEnabled ? 240 : 160, height: petEnabled ? 38 : 32)
+    }
+
+    /// Window size for an expanded panel whose visible content is `content` points tall.
+    func expandedSize(content: NSSize) -> NSSize {
+        guard hasNotch else { return content }
+        return NSSize(width: max(content.width, notchWidth + 2 * Self.topFillet),
+                      height: content.height + notchHeight)
+    }
+
+    func origin(for size: NSSize) -> NSPoint {
+        if hasNotch {
+            // Fusion: glued to the physical top edge, centered on the notch.
+            // User drag offsets are ignored — the shape must stay attached.
+            return NSPoint(x: screen.frame.midX - size.width / 2,
+                           y: screen.frame.maxY - size.height)
+        }
+        let centerX = NotchPanelController.userCenterX ?? screen.frame.midX
+        let x = max(screen.frame.minX, min(centerX - size.width / 2, screen.frame.maxX - size.width))
+        let y = NotchPanelController.userY ?? (screen.visibleFrame.maxY - size.height)
+        let clampedY = max(screen.frame.minY, min(y, screen.frame.maxY - size.height))
+        return NSPoint(x: x, y: clampedY)
+    }
+}
+
+/// Black shape that extends the physical notch downward: outward fillets at the
+/// screen's top edge, rounded corners at the bottom — same silhouette as the
+/// hardware cutout, so the panel reads as the notch itself growing taller.
+struct NotchFusionShape: Shape {
+    var topFillet: CGFloat = NotchGeometry.topFillet
+    var bottomRadius: CGFloat = 12
+
+    func path(in rect: CGRect) -> Path {
+        var p = Path()
+        p.move(to: CGPoint(x: rect.minX, y: rect.minY))
+        p.addQuadCurve(to: CGPoint(x: rect.minX + topFillet, y: rect.minY + topFillet),
+                       control: CGPoint(x: rect.minX + topFillet, y: rect.minY))
+        p.addLine(to: CGPoint(x: rect.minX + topFillet, y: rect.maxY - bottomRadius))
+        p.addQuadCurve(to: CGPoint(x: rect.minX + topFillet + bottomRadius, y: rect.maxY),
+                       control: CGPoint(x: rect.minX + topFillet, y: rect.maxY))
+        p.addLine(to: CGPoint(x: rect.maxX - topFillet - bottomRadius, y: rect.maxY))
+        p.addQuadCurve(to: CGPoint(x: rect.maxX - topFillet, y: rect.maxY - bottomRadius),
+                       control: CGPoint(x: rect.maxX - topFillet, y: rect.maxY))
+        p.addLine(to: CGPoint(x: rect.maxX - topFillet, y: rect.minY + topFillet))
+        p.addQuadCurve(to: CGPoint(x: rect.maxX, y: rect.minY),
+                       control: CGPoint(x: rect.maxX - topFillet, y: rect.minY))
+        p.closeSubpath()
+        return p
+    }
+}
+
 // MARK: - Keyable panel (accepts keyboard + first-click events)
 
 private class KeyablePanel: NSPanel {
@@ -67,7 +204,8 @@ private class KeyablePanel: NSPanel {
     private var isDragging = false
 
     override func mouseDown(with event: NSEvent) {
-        if NotchPanelController.dragEnabled && NotchPanelController.currentState == .idle {
+        if NotchPanelController.dragEnabled && NotchPanelController.currentState == .idle
+            && !NotchPanelController.fusionActive {
             initialMouseScreen = NSEvent.mouseLocation
             initialOrigin = frame.origin
             isDragging = false
@@ -78,6 +216,7 @@ private class KeyablePanel: NSPanel {
     override func mouseDragged(with event: NSEvent) {
         guard NotchPanelController.dragEnabled,
               NotchPanelController.currentState == .idle,
+              !NotchPanelController.fusionActive,
               let screen = self.screen ?? NSScreen.main else { return }
         isDragging = true
         let current = NSEvent.mouseLocation
@@ -163,40 +302,107 @@ enum NotchPanelController {
     /// Drag mode — off by default, toggled from status bar menu
     static var dragEnabled = false
 
-    private struct ScreenNotchProfile {
-        let screen: NSScreen
-        let menuBarHeight: CGFloat
-        let hasNotch: Bool
+    /// True while the visible panel is fused with a physical notch (drag disabled).
+    private(set) static var fusionActive = false
 
-        init(screen: NSScreen) {
-            self.screen = screen
-            self.menuBarHeight = screen.frame.maxY - screen.visibleFrame.maxY
-            // Notch Macs have a taller menu bar area to accommodate the camera cutout.
-            self.hasNotch = menuBarHeight > 30
+    private struct PermissionPresentation {
+        let hookInput: [String: Any]
+        let source: AgentSource
+        let onAllow: () -> Void
+        let onDeny: () -> Void
+    }
+
+    private struct CompletionPresentation {
+        let source: AgentSource
+        let message: String?
+        let cwd: String?
+        let launchContext: AgentLaunchContext
+    }
+
+    private enum ExpandedPresentation {
+        case permission(PermissionPresentation)
+        case completion(CompletionPresentation)
+        case activityFeed
+    }
+
+    private static var activePresentation: ExpandedPresentation?
+
+    /// Screen the panel should live on: prefer the built-in notch display,
+    /// fall back to the focused screen.
+    static func targetScreen() -> NSScreen? {
+        NSScreen.screens.first {
+            let geo = NotchGeometry(screen: $0)
+            return geo.hasNotch && !geo.isFakeNotch
         }
+            ?? NSScreen.screens.first { NotchGeometry(screen: $0).hasNotch }
+            ?? NSScreen.main
+            ?? NSScreen.screens.first
+    }
 
-        func idleSize(petEnabled: Bool) -> NSSize {
-            if hasNotch {
-                return NSSize(width: petEnabled ? 210 : 140, height: petEnabled ? 34 : 30)
-            }
-            return NSSize(width: petEnabled ? 240 : 160, height: petEnabled ? 38 : 32)
+    // MARK: - Screen change handling (dock/undock, resolution switch)
+
+    private static var screenObserver: NSObjectProtocol?
+
+    private static func installScreenObserverIfNeeded() {
+        guard screenObserver == nil else { return }
+        screenObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didChangeScreenParametersNotification,
+            object: nil, queue: .main
+        ) { _ in
+            handleScreenParametersChange()
         }
+    }
 
-        func defaultY(for size: NSSize, state: PanelState) -> CGFloat {
-            guard hasNotch else {
-                return screen.visibleFrame.maxY - size.height
-            }
-
-            switch state {
-            case .idle:
-                // Keep contents below the physical notch while visually attaching to its lower edge.
-                return screen.visibleFrame.maxY - size.height + 6
-            case .expanded:
-                return screen.visibleFrame.maxY - size.height - 8
-            case .hidden:
-                return screen.visibleFrame.maxY - size.height
-            }
+    private static func handleScreenParametersChange() {
+        guard let screen = targetScreen() else { return }
+        switch currentState {
+        case .idle:
+            // Geometry may have changed entirely — rebuild the pill from scratch.
+            mainPanel?.orderOut(nil)
+            mainPanel = nil
+            currentState = .hidden
+            showIdlePill(on: screen)
+        case .expanded:
+            rebuildExpandedPresentation(on: screen)
+        case .hidden:
+            break
         }
+    }
+
+    private static func rebuildExpandedPresentation(on screen: NSScreen) {
+        isAnimating = false
+        switch activePresentation {
+        case .permission(let presentation):
+            present(
+                hookInput: presentation.hookInput,
+                source: presentation.source,
+                onAllow: presentation.onAllow,
+                onDeny: presentation.onDeny
+            )
+        case .completion(let presentation):
+            showCompletion(
+                source: presentation.source,
+                message: presentation.message,
+                cwd: presentation.cwd,
+                launchContext: presentation.launchContext
+            )
+        case .activityFeed:
+            showActivityFeed()
+        case nil:
+            collapseExpandedToIdle(on: screen)
+        }
+    }
+
+    private static func collapseExpandedToIdle(on screen: NSScreen) {
+        removeKeyMonitor()
+        onEscAction = nil
+        onEnterAction = nil
+        activePresentation = nil
+        mainPanel?.orderOut(nil)
+        mainPanel = nil
+        currentState = .hidden
+        fusionActive = false
+        showIdlePill(on: screen)
     }
 
     // MARK: - Expanded permission view (animated from pill)
@@ -209,7 +415,14 @@ enum NotchPanelController {
     ) {
         stopRefreshTimer()
         if sessionStart == nil { sessionStart = Date() }
-        guard let screen = NSScreen.main else { return }
+        guard let screen = targetScreen() else { return }
+        let geo = NotchGeometry(screen: screen)
+        activePresentation = .permission(PermissionPresentation(
+            hookInput: hookInput,
+            source: source,
+            onAllow: onAllow,
+            onDeny: onDeny
+        ))
 
         PetState.mood = .thinking
 
@@ -227,17 +440,18 @@ enum NotchPanelController {
             source: source,
             petEnabled: PetState.enabled,
             petAnim: petAnim,
+            topInset: geo.notchHeight,
             onAllow: {
                 onEscAction = nil; onEnterAction = nil
                 PetState.mood = .happy
-                animateTo(.idle, on: screen)
+                animateTo(.idle)
                 onAllow()
                 DispatchQueue.main.asyncAfter(deadline: .now() + 3) { PetState.mood = .idle }
             },
             onDeny: {
                 onEscAction = nil; onEnterAction = nil
                 PetState.mood = .sad
-                animateTo(.idle, on: screen)
+                animateTo(.idle)
                 onDeny()
                 DispatchQueue.main.asyncAfter(deadline: .now() + 3) { PetState.mood = .idle }
             },
@@ -247,26 +461,25 @@ enum NotchPanelController {
         )
 
         let host = FirstMouseHostingView(rootView: root)
-        let w: CGFloat = 380
-        let h: CGFloat = 220
-        host.frame = NSRect(x: 0, y: 0, width: w, height: h)
+        let size = geo.expandedSize(content: NSSize(width: 380, height: 220))
+        host.frame = NSRect(origin: .zero, size: size)
 
         onEscAction = {
             PetState.mood = .sad
             removeKeyMonitor()
-            animateTo(.idle, on: screen)
+            animateTo(.idle)
             onDeny()
             DispatchQueue.main.asyncAfter(deadline: .now() + 3) { PetState.mood = .idle }
         }
         onEnterAction = {
             PetState.mood = .happy
             removeKeyMonitor()
-            animateTo(.idle, on: screen)
+            animateTo(.idle)
             onAllow()
             DispatchQueue.main.asyncAfter(deadline: .now() + 3) { PetState.mood = .idle }
         }
 
-        transitionPanel(to: host, size: NSSize(width: w, height: h), state: .expanded, on: screen)
+        transitionPanel(to: host, size: size, state: .expanded, on: screen)
     }
 
     // MARK: - Completion notification (expanded banner, auto-dismiss)
@@ -274,7 +487,14 @@ enum NotchPanelController {
     static func showCompletion(source: AgentSource, message: String? = nil, cwd: String? = nil,
                                launchContext: AgentLaunchContext = .unknown) {
         stopRefreshTimer()
-        guard let screen = NSScreen.main else { return }
+        guard let screen = targetScreen() else { return }
+        let geo = NotchGeometry(screen: screen)
+        activePresentation = .completion(CompletionPresentation(
+            source: source,
+            message: message,
+            cwd: cwd,
+            launchContext: launchContext
+        ))
 
         let root = NotchCompletionView(
             source: source,
@@ -283,25 +503,25 @@ enum NotchPanelController {
             elapsed: elapsedString(),
             petEnabled: PetState.enabled,
             petAnim: petAnim,
+            topInset: geo.notchHeight,
             onJump: {
                 TerminalJumper.jump(cwd: cwd, source: source, launchContext: launchContext)
-                animateTo(.idle, on: screen)
+                animateTo(.idle)
             },
             onDismiss: {
-                animateTo(.idle, on: screen)
+                animateTo(.idle)
             }
         )
 
         let host = FirstMouseHostingView(rootView: root)
-        let w: CGFloat = 340
-        let h: CGFloat = 80
-        host.frame = NSRect(x: 0, y: 0, width: w, height: h)
+        let size = geo.expandedSize(content: NSSize(width: 340, height: 80))
+        host.frame = NSRect(origin: .zero, size: size)
         onEscAction = {
             removeKeyMonitor()
-            animateTo(.idle, on: screen)
+            animateTo(.idle)
         }
 
-        transitionPanel(to: host, size: NSSize(width: w, height: h), state: .expanded, on: screen)
+        transitionPanel(to: host, size: size, state: .expanded, on: screen)
     }
 
     // MARK: - Activity feed (expanded live code view)
@@ -309,32 +529,35 @@ enum NotchPanelController {
     static func showActivityFeed() {
         stopRefreshTimer()
         isAnimating = false
-        guard let screen = NSScreen.main else { return }
+        guard let screen = targetScreen() else { return }
+        let geo = NotchGeometry(screen: screen)
+        activePresentation = .activityFeed
 
         let root = NotchActivityFeedView(
             activityLog: activityLog,
             elapsed: elapsedString(),
+            topInset: geo.notchHeight,
             onClose: {
-                animateTo(.idle, on: screen)
+                animateTo(.idle)
             }
         )
 
         let host = FirstMouseHostingView(rootView: root)
-        let w: CGFloat = 380
-        let h: CGFloat = 260
-        host.frame = NSRect(x: 0, y: 0, width: w, height: h)
+        let size = geo.expandedSize(content: NSSize(width: 380, height: 260))
+        host.frame = NSRect(origin: .zero, size: size)
 
         onEscAction = {
             removeKeyMonitor()
-            animateTo(.idle, on: screen)
+            animateTo(.idle)
         }
 
-        transitionPanel(to: host, size: NSSize(width: w, height: h), state: .expanded, on: screen)
+        transitionPanel(to: host, size: size, state: .expanded, on: screen)
     }
 
     // MARK: - Idle pill
 
     static func showIdlePill(on screen: NSScreen) {
+        activePresentation = nil
         if sessionStart == nil { sessionStart = Date() }
 
         let petOn = PetState.enabled
@@ -357,14 +580,15 @@ enum NotchPanelController {
             return
         }
 
-        let profile = ScreenNotchProfile(screen: screen)
-        let idleSize = profile.idleSize(petEnabled: petOn)
+        let geo = NotchGeometry(screen: screen)
+        let idleSize = geo.idleSize(petEnabled: petOn)
 
         let root = NotchIdlePillView(
             state: idleState,
             petAnim: petAnim,
             activityLog: activityLog,
-            compact: profile.hasNotch
+            compact: geo.hasNotch,
+            topInset: geo.notchHeight
         )
         let host = FirstMouseHostingView(rootView: root)
         host.frame = NSRect(origin: .zero, size: idleSize)
@@ -380,6 +604,7 @@ enum NotchPanelController {
         removeKeyMonitor()
         onEscAction = nil
         onEnterAction = nil
+        activePresentation = nil
         fadeOutAndRemove()
         currentState = .hidden
     }
@@ -390,11 +615,13 @@ enum NotchPanelController {
 
     // MARK: - Animated transitions (Dynamic Island style)
 
-    private static func animateTo(_ target: PanelState, on screen: NSScreen) {
+    private static func animateTo(_ target: PanelState, on screen: NSScreen? = nil) {
         guard !isAnimating else { return }
         switch target {
         case .idle:
-            if currentState == .expanded, let pan = mainPanel {
+            guard let screen = screen ?? targetScreen() else { return }
+            activePresentation = nil
+            if currentState == .expanded, let pan = mainPanel, !fusionActive {
                 isAnimating = true
                 currentState = .hidden
                 NSAnimationContext.runAnimationGroup({ ctx in
@@ -407,6 +634,8 @@ enum NotchPanelController {
                     showIdlePill(on: screen)
                 })
             } else {
+                // Fusion: morph the notch shape directly back into the pill
+                // (Dynamic Island contraction) instead of fading out.
                 showIdlePill(on: screen)
             }
         case .expanded:
@@ -421,7 +650,7 @@ enum NotchPanelController {
         if let esc = onEscAction {
             esc()
             onEscAction = nil
-        } else if let screen = NSScreen.main {
+        } else if let screen = targetScreen() {
             removeKeyMonitor()
             animateTo(.idle, on: screen)
         }
@@ -463,18 +692,11 @@ enum NotchPanelController {
         if let m = localKeyMonitor { NSEvent.removeMonitor(m); localKeyMonitor = nil }
     }
 
-    private static func panelOrigin(for size: NSSize, state: PanelState, on screen: NSScreen) -> NSPoint {
-        let profile = ScreenNotchProfile(screen: screen)
-        let centerX = userCenterX ?? screen.frame.midX
-        let x = max(screen.frame.minX, min(centerX - size.width / 2, screen.frame.maxX - size.width))
-        let y = userY ?? profile.defaultY(for: size, state: state)
-        let clampedY = max(screen.frame.minY, min(y, screen.frame.maxY - size.height))
-        return NSPoint(x: x, y: clampedY)
-    }
-
     private static func transitionPanel(to content: NSView, size: NSSize, state: PanelState, on screen: NSScreen) {
-        let origin = panelOrigin(for: size, state: state, on: screen)
-        let targetFrame = NSRect(origin: origin, size: size)
+        installScreenObserverIfNeeded()
+        let geo = NotchGeometry(screen: screen)
+        fusionActive = geo.hasNotch
+        let targetFrame = NSRect(origin: geo.origin(for: size), size: size)
 
         if state == .expanded {
             installKeyMonitor()
@@ -494,10 +716,9 @@ enum NotchPanelController {
 
             currentState = state
         } else {
-            let pan = createPanel(content: content, frame: targetFrame)
-            let pillSize = ScreenNotchProfile(screen: screen).idleSize(petEnabled: PetState.enabled)
-            let pillOrigin = panelOrigin(for: pillSize, state: .idle, on: screen)
-            let startFrame = NSRect(origin: pillOrigin, size: pillSize)
+            let pan = createPanel(content: content, frame: targetFrame, on: screen)
+            let pillSize = geo.idleSize(petEnabled: PetState.enabled)
+            let startFrame = NSRect(origin: geo.origin(for: pillSize), size: pillSize)
             pan.setFrame(startFrame, display: false)
             pan.alphaValue = 0
             pan.orderFrontRegardless()
@@ -525,7 +746,7 @@ enum NotchPanelController {
         })
     }
 
-    private static func createPanel(content: NSView, frame: NSRect) -> KeyablePanel {
+    private static func createPanel(content: NSView, frame: NSRect, on screen: NSScreen) -> KeyablePanel {
         let pan = KeyablePanel(
             contentRect: NSRect(origin: .zero, size: frame.size),
             styleMask: [.nonactivatingPanel, .fullSizeContentView, .borderless],
@@ -537,7 +758,7 @@ enum NotchPanelController {
         // which is reserved for system shielding (login / lock screen) and on
         // macOS 26 fights with the window server, causing the panel to be
         // periodically hidden/shown by the system.
-        if let screen = NSScreen.main, ScreenNotchProfile(screen: screen).hasNotch {
+        if NotchGeometry(screen: screen).hasNotch {
             pan.level = .screenSaver
         } else {
             pan.level = .statusBar
@@ -616,6 +837,8 @@ private struct NotchExpandedView: View {
     let source: AgentSource
     let petEnabled: Bool
     @ObservedObject var petAnim: PetAnimationState
+    /// Physical notch height; > 0 switches to the fused (notch-extension) look.
+    let topInset: CGFloat
     let onAllow: () -> Void
     let onDeny: () -> Void
     let onJump: () -> Void
@@ -623,7 +846,7 @@ private struct NotchExpandedView: View {
     @Environment(\.colorScheme) private var scheme
 
     var body: some View {
-        let theme = NotchTheme.current(scheme)
+        let theme = NotchTheme.current(topInset > 0 ? .dark : scheme)
         VStack(alignment: .leading, spacing: 10) {
             // Header row: source badge + tool + pet + elapsed
             HStack(spacing: 8) {
@@ -718,7 +941,8 @@ private struct NotchExpandedView: View {
             }
         }
         .padding(16)
-        .background(NotchBackground(shape: RoundedRectangle(cornerRadius: 22)))
+        .padding(.top, topInset)
+        .background(FusableBackground(topInset: topInset, cornerRadius: 22))
     }
 
     private var toolIcon: some View {
@@ -826,16 +1050,47 @@ private struct NotchIdlePillView: View {
     @ObservedObject var petAnim: PetAnimationState
     @ObservedObject var activityLog: ActivityLog
     let compact: Bool
+    /// Physical notch height; > 0 switches to the fused (notch-extension) look.
+    let topInset: CGFloat
 
     @Environment(\.colorScheme) private var scheme
 
     var body: some View {
-        let theme = NotchTheme.current(scheme)
-        HStack(spacing: compact ? 4 : 6) {
+        if topInset > 0 {
+            // Fused: content lives in the visible strip below the hardware notch,
+            // drawn on a solid black notch-extension shape.
+            pillRow
+                .padding(.horizontal, 10)
+                .frame(maxWidth: .infinity)
+                .frame(height: NotchGeometry.idleStripHeight)
+                .frame(maxHeight: .infinity, alignment: .bottom)
+                .background(NotchFusionShape(bottomRadius: 12).fill(Color.black))
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    NotchPanelController.showActivityFeed()
+                }
+        } else {
+            pillRow
+                .padding(.horizontal, compact ? 10 : 12)
+                .padding(.vertical, compact ? 3 : 4)
+                .background(NotchBackground(shape: Capsule()))
+                .contentShape(Capsule())
+                .onTapGesture {
+                    NotchPanelController.showActivityFeed()
+                }
+        }
+    }
+
+    private var pillRow: some View {
+        let theme = NotchTheme.current(topInset > 0 ? .dark : scheme)
+        return HStack(spacing: compact ? 4 : 6) {
             if state.petEnabled {
+                // Fused pill has a taller strip on solid black — let the pet
+                // render at its natural size instead of the compact downscale.
                 PixelPetView(mood: state.petMood, anim: petAnim, interactive: true)
-                    .frame(width: compact ? 44 : 60, height: compact ? 24 : 28)
-                    .scaleEffect(compact ? 0.74 : 0.9)
+                    .frame(width: topInset > 0 ? 56 : (compact ? 44 : 60),
+                           height: topInset > 0 ? 28 : (compact ? 24 : 28))
+                    .scaleEffect(topInset > 0 ? 1.0 : (compact ? 0.74 : 0.9))
             } else {
                 Circle()
                     .fill(Color.green)
@@ -880,13 +1135,6 @@ private struct NotchIdlePillView: View {
                 PulsingDot()
             }
         }
-        .padding(.horizontal, compact ? 10 : 12)
-        .padding(.vertical, compact ? 3 : 4)
-        .background(NotchBackground(shape: Capsule()))
-        .contentShape(Capsule())
-        .onTapGesture {
-            NotchPanelController.showActivityFeed()
-        }
     }
 }
 
@@ -921,6 +1169,8 @@ private struct NotchCompletionView: View {
     let elapsed: String
     let petEnabled: Bool
     @ObservedObject var petAnim: PetAnimationState
+    /// Physical notch height; > 0 switches to the fused (notch-extension) look.
+    let topInset: CGFloat
     let onJump: () -> Void
     let onDismiss: () -> Void
 
@@ -931,7 +1181,7 @@ private struct NotchCompletionView: View {
     }
 
     var body: some View {
-        let theme = NotchTheme.current(scheme)
+        let theme = NotchTheme.current(topInset > 0 ? .dark : scheme)
         HStack(spacing: 10) {
             ZStack {
                 Circle()
@@ -997,7 +1247,8 @@ private struct NotchCompletionView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
-        .background(NotchBackground(shape: RoundedRectangle(cornerRadius: 22)))
+        .padding(.top, topInset)
+        .background(FusableBackground(topInset: topInset, cornerRadius: 22))
     }
 }
 
@@ -1149,6 +1400,8 @@ private final class CodeStreamState: ObservableObject {
 private struct NotchActivityFeedView: View {
     @ObservedObject var activityLog: ActivityLog
     let elapsed: String
+    /// Physical notch height; > 0 switches to the fused (notch-extension) look.
+    let topInset: CGFloat
     let onClose: () -> Void
 
     @StateObject private var stream = CodeStreamState()
@@ -1217,16 +1470,23 @@ private struct NotchActivityFeedView: View {
             .padding(.horizontal, 8)
             .padding(.bottom, 10)
         }
-        .background(
+        .padding(.top, topInset)
+        .background(feedBackground)
+        .onAppear { stream.start(activityLog: activityLog) }
+        .onDisappear { stream.stop() }
+    }
+
+    @ViewBuilder private var feedBackground: some View {
+        if topInset > 0 {
+            NotchFusionShape(bottomRadius: 22).fill(Color.black)
+        } else {
             Color.black.opacity(0.9)
                 .clipShape(RoundedRectangle(cornerRadius: 22))
                 .overlay(
                     RoundedRectangle(cornerRadius: 22)
                         .strokeBorder(Color.green.opacity(0.15), lineWidth: 0.5)
                 )
-        )
-        .onAppear { stream.start(activityLog: activityLog) }
-        .onDisappear { stream.stop() }
+        }
     }
 }
 

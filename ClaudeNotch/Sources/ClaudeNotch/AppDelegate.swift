@@ -42,7 +42,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            if let screen = NSScreen.main {
+            if let screen = NotchPanelController.targetScreen() {
                 NotchPanelController.showIdlePill(on: screen)
                 NSLog("ClaudeNotch: idle pill displayed on launch")
             }
@@ -99,7 +99,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func togglePet(_ sender: NSMenuItem) {
         PetState.enabled.toggle()
         sender.title = PetState.enabled ? "Pet: ON" : "Pet: OFF"
-        if let screen = NSScreen.main, pending == nil {
+        if let screen = NotchPanelController.targetScreen(), pending == nil {
             NotchPanelController.showIdlePill(on: screen)
         }
     }
@@ -112,7 +112,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func resetPosition(_ sender: NSMenuItem) {
         NotchPanelController.userCenterX = nil
         NotchPanelController.userY = nil
-        if let screen = NSScreen.main, pending == nil {
+        if let screen = NotchPanelController.targetScreen(), pending == nil {
             NotchPanelController.dismiss()
             NotchPanelController.showIdlePill(on: screen)
         }
@@ -322,7 +322,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // ~1s pulse on macOS 26 even after settle).
             NotchPanelController.idleStateRef.isWorking = false
             NotchPanelController.idleStateRef.lastActivity = ""
-            if let screen = NSScreen.main {
+            if let screen = NotchPanelController.targetScreen() {
                 NotchPanelController.showIdlePill(on: screen)
             }
             strongSelf.updateStatusIcon("busy")
@@ -357,7 +357,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NotchPanelController.idleStateRef.isWorking = true
             NotchPanelController.idleStateRef.lastActivity = hookName
             updateStatusIcon("waiting")
-            if NotchPanelController.currentState != .expanded, let screen = NSScreen.main {
+            if NotchPanelController.currentState != .expanded, let screen = NotchPanelController.targetScreen() {
                 NotchPanelController.showIdlePill(on: screen)
             }
         } else if let stop = msg["stop_event"] as? [String: Any] {

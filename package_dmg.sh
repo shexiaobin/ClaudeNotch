@@ -2,7 +2,7 @@
 # 构建 ClaudeNotch.app 并生成可分发的 DMG（需 Xcode Command Line Tools）。
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"
-VERSION="${CLAUDENOTCH_VERSION:-1.0.10}"
+VERSION="${CLAUDENOTCH_VERSION:-1.0.11}"
 DIST="$ROOT/dist"
 STAGE="$DIST/staging"
 APP_NAME="ClaudeNotch.app"

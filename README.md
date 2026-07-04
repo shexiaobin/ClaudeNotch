@@ -110,6 +110,7 @@ ClaudeNotch (Swift macOS App)
 ### 环境变量
 
 - `CLAUDE_NOTCH_SOCKET` — 自定义 socket 路径（默认 `~/.claude-notch/bridge.sock`）
+- `CLAUDE_NOTCH_FAKE_NOTCH` — 调试用：在无刘海屏幕上模拟刘海几何，格式 `宽x高`（如 `200x32`），用于在非刘海 Mac 上开发验证融合面板效果
 
 ### 自动超时
 
@@ -186,7 +187,7 @@ python3 bridge/test_bridge_e2e.py
 
 发布 DMG 前建议完成以下检查：
 
-- 从 GitHub Release 下载 `ClaudeNotch-1.0.10-arm64.dmg`
+- 从 GitHub Release 下载 `ClaudeNotch-1.0.11-arm64.dmg`
 - 挂载 DMG，确认包含 `ClaudeNotch.app`、`Install Hooks.command` 和说明文件
 - 运行 `Install Hooks.command` 后，确认 Claude Code、Cursor 与 Codex hooks 指向 `/Applications/ClaudeNotch.app/Contents/Resources/bridge`
 - 菜单栏 `Run Diagnostics` 应显示三家 hooks 指向当前 bridge；`Repair Hooks` 不应删除用户自己的非 ClaudeNotch hook
